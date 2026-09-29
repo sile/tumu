@@ -1,0 +1,236 @@
+//! An end-to-end harness that drives the real `tumu` binary behind a PTY.
+//!
+//! The binary is launched as a child of a [`termnix::Session`], which owns the
+//! PTY and an I/O-free terminal emulator. Resizes go through
+//! [`termnix::Session::resize`], and the rendered grid is read back from the
+//! emulator. Nothing here touches `tumu`'s own code: the tests exercise the same
+//! bytes a real terminal would send and assert on the same grid a real terminal
+//! would show.
+
+#![allow(dead_code)]
+
+use std::{
+    path::PathBuf,
+    process::Command,
+    time::{Duration, Instant},
+};
+
+/// How long a `wait_until` predicate may stay unsatisfied before the test
+/// fails. Generous because a fresh binary may need to be paged in.
+const WAIT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Drives one `tumu` child process behind a PTY.
+///
+/// The harness owns the [`termnix::Session`]; dropping it closes the session
+/// and reaps the child.
+pub struct TumuHarness {
+    session: termnix::Session,
+    rows: u16,
+    cols: u16,
+}
+
+impl TumuHarness {
+    /// Launches the `tumu` binary at an 80x24 terminal.
+    pub fn open() -> Self {
+        Self::with_size(24, 80)
+    }
+
+    /// Launches the `tumu` binary at a terminal of `rows`x`cols`.
+    pub fn with_size(rows: u16, cols: u16) -> Self {
+        let mut command = Command::new(tumu_binary());
+        let session = termnix::Session::new(&mut command, size(rows, cols))
+            .expect("failed to start the tumu binary behind a PTY");
+        Self {
+            session,
+            rows,
+            cols,
+        }
+    }
+
+    /// Resizes the terminal, delivering SIGWINCH to `tumu`.
+    pub fn resize(&mut self, rows: u16, cols: u16) {
+        self.session
+            .resize(size(rows, cols))
+            .expect("failed to resize the PTY");
+        self.rows = rows;
+        self.cols = cols;
+    }
+
+    /// Reads the visible grid back as one trimmed string per row.
+    pub fn screen_rows(&self) -> Vec<String> {
+        let state = self.session.terminal_state();
+        let mut rows = Vec::new();
+        for line in state.scrollback_lines() {
+            rows.push(line_text(line.cells()));
+        }
+        for row in 0..self.rows {
+            let mut cells = Vec::with_capacity(self.cols as usize);
+            for col in 0..self.cols {
+                let cell = state
+                    .cell(termnix::Position { row, col })
+                    .expect("cell within the emulator grid");
+                cells.push(cell);
+            }
+            rows.push(line_text(&cells));
+        }
+        rows
+    }
+
+    /// Whether any visible row contains `needle`.
+    pub fn screen_contains(&self, needle: &str) -> bool {
+        self.screen_rows().iter().any(|r| r.contains(needle))
+    }
+
+    /// The whole screen with rows joined by newlines.
+    pub fn screen_text(&self) -> String {
+        self.screen_rows().join("\n")
+    }
+
+    /// Pumps the session until `pred` holds, or panics after `WAIT_TIMEOUT`.
+    ///
+    /// `pred` receives the harness so it can read the grid; it must not mutate
+    /// the harness, which keeps every assertion a pure read.
+    pub fn wait_until<F>(&mut self, what: &str, pred: F)
+    where
+        F: Fn(&TumuHarness) -> bool,
+    {
+        let deadline = Instant::now() + WAIT_TIMEOUT;
+        loop {
+            self.pump();
+            if pred(self) {
+                return;
+            }
+            if Instant::now() >= deadline {
+                panic!(
+                    "timed out waiting for: {what}\nscreen:\n{}",
+                    self.screen_text()
+                );
+            }
+            self.poll_once(deadline);
+        }
+    }
+
+    /// Waits until the screen shows `needle`, printing the grid on failure.
+    pub fn wait_for_text(&mut self, needle: &str) {
+        self.wait_until(needle, |h| h.screen_contains(needle));
+    }
+
+    /// Pumps the session until the child exits, or panics after `WAIT_TIMEOUT`.
+    pub fn wait_for_exit(&mut self) -> std::process::ExitStatus {
+        let deadline = Instant::now() + WAIT_TIMEOUT;
+        loop {
+            self.pump();
+            if let Some(status) = self.session.exit_status()
+                && (self.session.status() == termnix::SessionStatus::Eof
+                    || (self.session.fd().is_none() && !self.session.needs_pump()))
+            {
+                return status;
+            }
+            if let Err(err) = self.session.try_wait() {
+                panic!("try_wait failed: {err}");
+            }
+            if Instant::now() >= deadline {
+                panic!(
+                    "timed out waiting for tumu to exit\nscreen:\n{}",
+                    self.screen_text()
+                );
+            }
+            self.poll_once(deadline);
+        }
+    }
+
+    /// Advances the session by one bounded pump.
+    fn pump(&mut self) {
+        self.session
+            .pump_io(termnix::PumpBudget::default())
+            .expect("pump_io failed");
+        let mut budget = 64;
+        while self.session.needs_pump() && budget > 0 {
+            self.session
+                .pump_io(termnix::PumpBudget::default())
+                .expect("pump_io failed");
+            budget -= 1;
+        }
+    }
+
+    /// Blocks until the child has something to say, or the deadline passes.
+    fn poll_once(&mut self, deadline: Instant) {
+        if self.session.needs_pump() {
+            return;
+        }
+        let Some(fd) = self.session.fd() else {
+            return;
+        };
+        let interests = self.session.interests();
+        let mut events = 0;
+        if interests.readable {
+            events |= libc::POLLIN;
+        }
+        if interests.writable {
+            events |= libc::POLLOUT;
+        }
+        if events == 0 {
+            return;
+        }
+        let timeout = poll_timeout_ms(deadline);
+        let mut pollfd = libc::pollfd {
+            fd: fd as libc::c_int,
+            events,
+            revents: 0,
+        };
+        // SAFETY: `poll` receives one fully initialized `pollfd` and a count of
+        // one, and only writes to `revents` within that array.
+        #[expect(
+            unsafe_code,
+            reason = "the e2e harness waits for the child with libc::poll"
+        )]
+        let rc = unsafe { libc::poll(&mut pollfd, 1, timeout) };
+        if rc < 0 {
+            let err = std::io::Error::last_os_error();
+            if err.kind() != std::io::ErrorKind::Interrupted {
+                panic!("poll failed: {err}");
+            }
+        }
+    }
+}
+
+impl Drop for TumuHarness {
+    fn drop(&mut self) {
+        self.session.close();
+    }
+}
+
+/// Renders one row of cells as a string, dropping wide-character padding.
+fn line_text(cells: &[termnix::Cell]) -> String {
+    let mut line = String::new();
+    for cell in cells {
+        if cell.width == 0 {
+            continue;
+        }
+        line.push(cell.ch);
+    }
+    line.trim_end().to_string()
+}
+
+/// A non-zero [`termnix::Size`] from plain `u16` dimensions.
+fn size(rows: u16, cols: u16) -> termnix::Size {
+    termnix::Size {
+        rows: std::num::NonZeroU16::new(rows).expect("rows must be non-zero"),
+        cols: std::num::NonZeroU16::new(cols).expect("cols must be non-zero"),
+    }
+}
+
+/// Milliseconds until `deadline`, clamped to a finite non-negative value.
+fn poll_timeout_ms(deadline: Instant) -> libc::c_int {
+    let now = Instant::now();
+    if now >= deadline {
+        return 0;
+    }
+    let ms = deadline.duration_since(now).as_millis();
+    libc::c_int::try_from(ms).unwrap_or(libc::c_int::MAX).max(0)
+}
+
+/// The path to the `tumu` binary cargo built for this test run.
+fn tumu_binary() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_tumu"))
+}

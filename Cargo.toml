@@ -3,5 +3,14 @@ name = "tumu"
 version = "0.0.1"
 edition = "2024"
 publish = false
+description = "A terminal multiplexer with stacked windows"
 
 [dependencies]
+libc = "0.2"
+noargs = "0.4"
+termnix = "0.3"
+tuinix = "0.7"
+
+[dev-dependencies]
+noprop = "0.2"
+tuinix = "0.7"

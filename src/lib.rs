@@ -1,14 +1,38 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! `tumu`'s Sans I/O core.
+//!
+//! A terminal multiplexer that arranges its windows in a stack: a new window
+//! goes on top, and every window's size is derived from the stack rather than
+//! set by hand, so a change to the terminal's size -- a rotation, most of all --
+//! re-lays the stack out instead of moving it.
+//!
+//! This crate holds everything that does not touch a file descriptor, a child
+//! process, or a clock: the stack model ([`Stack`]) with its size derivation,
+//! the state ([`State`]) with its pure handlers, and the renderer that paints a
+//! [`Frame`](tuinix::Frame) from that state. The one thing the core decides but
+//! does not perform is I/O: spawning children, reading and writing the terminal,
+//! and resizing the PTYs all happen at the edge in the binary's `app` module.
+//! The core hands back plain values -- the region a window should occupy, the
+//! frame to draw -- and is driven entirely by calls from the edge.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#![warn(missing_docs)]
+#![forbid(unsafe_code)]
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+mod action;
+mod event;
+mod geometry;
+mod id;
+mod render;
+mod stack;
+mod state;
+mod window;
+
+pub use action::Action;
+pub use event::Event;
+pub use geometry::{
+    cell_size_to_terminal_size, split_region, terminal_region, terminal_size_to_cell_size,
+};
+pub use id::{TermnixSessionId, WindowId};
+pub use render::{frame, window_content_region};
+pub use stack::Stack;
+pub use state::State;
+pub use window::Window;
