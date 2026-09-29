@@ -38,7 +38,12 @@ fn the_regions_sum_to_the_terminal_rows() {
             // Every window needs at least one row, so there can be no more
             // windows than the terminal has rows.
             let count = noprop::sample_usize_in(ctx, 1..=rows);
+            let num = noprop::sample_usize_in(ctx, 0..=8) as u32;
+            let den = noprop::sample_usize_in(ctx, 0..=8) as u32;
             let mut stack = tumu::Stack::new();
+            if let Some(ratio) = tumu::Ratio::new(num, den) {
+                stack.set_ratio(ratio);
+            }
             for _ in 0..count {
                 stack.push_top();
             }
@@ -57,7 +62,7 @@ fn the_regions_sum_to_the_terminal_rows() {
 }
 
 #[test]
-fn equal_weights_halve_the_remaining_space() {
+fn the_default_odds_halve_the_remaining_space() {
     let mut stack = tumu::Stack::new();
     stack.push_top();
     stack.push_top();
@@ -71,6 +76,42 @@ fn equal_weights_halve_the_remaining_space() {
         .collect();
 
     assert_eq!(rows, vec![12, 6, 6]);
+}
+
+#[test]
+fn a_ratio_of_two_to_one_grows_every_window_but_the_last() {
+    let mut stack = tumu::Stack::new();
+    stack.push_top();
+    stack.push_top();
+    stack.push_top();
+    stack.set_ratio(tumu::Ratio::new(2, 1).expect("2:1"));
+
+    // 2:1 of 24 is 16, then 2:1 of the 8 left is 6 (rounded up), then 2.
+    let rows: Vec<usize> = stack
+        .regions(size(24, 80))
+        .iter()
+        .map(|r| r.size.rows)
+        .collect();
+
+    assert_eq!(rows, vec![16, 6, 2]);
+}
+
+#[test]
+fn a_ratio_of_zero_hands_everything_to_the_windows_below() {
+    let mut stack = tumu::Stack::new();
+    stack.push_top();
+    stack.push_top();
+    stack.push_top();
+    stack.set_ratio(tumu::Ratio::new(0, 1).expect("0:1"));
+
+    // The two top windows are squeezed to the one row they must keep.
+    let rows: Vec<usize> = stack
+        .regions(size(24, 80))
+        .iter()
+        .map(|r| r.size.rows)
+        .collect();
+
+    assert_eq!(rows, vec![1, 1, 22]);
 }
 
 #[test]

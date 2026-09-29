@@ -6,22 +6,38 @@
 //! terminal size, the order, and the weights -- which is what lets a rotation
 //! re-lay the stack out rather than try to restore it.
 
-use crate::{TermnixSessionId, Window, geometry, id::WindowId};
+use crate::{Ratio, TermnixSessionId, Window, geometry, id::WindowId};
 
 /// An ordered stack of windows filling a terminal.
 #[derive(Debug, Clone)]
 pub struct Stack {
     windows: Vec<(WindowId, Window)>,
     next_id: std::num::NonZeroU64,
+    ratio: Ratio,
 }
 
 impl Stack {
-    /// Builds an empty stack.
+    /// Builds an empty stack with the default `1 : 1` odds.
     pub const fn new() -> Self {
         Self {
             windows: Vec::new(),
             next_id: std::num::NonZeroU64::MIN,
+            ratio: Ratio::DEFAULT,
         }
+    }
+
+    /// Returns the odds the stack splits by.
+    pub fn ratio(&self) -> Ratio {
+        self.ratio
+    }
+
+    /// Sets the odds the stack splits by.
+    ///
+    /// Every window's region is derived from this on demand, so the next
+    /// [`regions()`](Stack::regions) reflects the change; the edge resizes the
+    /// sessions to match.
+    pub fn set_ratio(&mut self, ratio: Ratio) {
+        self.ratio = ratio;
     }
 
     /// Returns the windows from the top of the stack to the bottom.
@@ -96,11 +112,12 @@ impl Stack {
     /// `size`.
     ///
     /// The derivation is a left fold over the windows. Each window takes its
-    /// weight's share of the rows left, measured against a single unit for all
-    /// the windows still below it; the last window takes whatever remains. With
-    /// every weight one this halves the space at each step, so two windows are
-    /// `1:1` and three are `1:1` then `1:1` of the rest -- exactly the odds the
-    /// README gives.
+    /// share of the rows left, measured against everything still below it as a
+    /// single opponent; the last window takes whatever remains. The share is
+    /// the stack's [ratio](Stack::ratio) read as `window : rest`, so the
+    /// default `1 : 1` halves the space at each step: two windows are `1:1` and
+    /// three are `1:1` then `1:1` of the rest -- exactly the odds the README
+    /// gives.
     ///
     /// The regions are returned in stack order and their heights sum to the
     /// terminal's rows, the last taking whatever remains.
@@ -118,24 +135,19 @@ impl Stack {
                 break;
             }
 
-            // The share of the rows left that this window claims. Every window
-            // still below is one sibling whose weight is a single unit, so the
-            // split is `own : 1`: with the default weights each window takes
-            // half of what is left, which is the `1:1` odds the README gives.
+            // The share of the rows left that this window claims, from the
+            // stack's ratio read as `window : rest`. With the default odds
+            // each window takes half of what is left, which is the `1:1` the
+            // README gives.
             //
             // The share is kept within what the windows below can leave: each
             // of them needs a row, so this window may claim at most
             // `rows - below_count`. That keeps the heights summing to the
             // terminal's rows even when the windows outnumber them, instead of
             // rounding a share up into rows that do not exist.
-            let own = u32::from(self.windows[index].1.weight);
             let rows = remaining.size.rows;
             let below = self.windows.len() - index - 1;
-            let wanted = if own == 0 {
-                rows
-            } else {
-                (rows as u32 * own).div_ceil(own + 1) as usize
-            };
+            let wanted = self.ratio.share_of(rows);
             let share = wanted.clamp(1, rows.saturating_sub(below).max(1));
             let (top, rest) = geometry::split_region(remaining, share);
             regions.push(top);

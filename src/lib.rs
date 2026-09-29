@@ -21,6 +21,7 @@ mod action;
 mod event;
 mod geometry;
 mod id;
+mod ratio;
 mod render;
 mod stack;
 mod state;
@@ -32,6 +33,7 @@ pub use geometry::{
     cell_size_to_terminal_size, split_region, terminal_region, terminal_size_to_cell_size,
 };
 pub use id::{TermnixSessionId, WindowId};
+pub use ratio::Ratio;
 pub use render::{frame, window_content_region};
 pub use stack::Stack;
 pub use state::State;
