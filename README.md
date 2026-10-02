@@ -68,6 +68,7 @@ tmux's own prefix. It returns to `c-o` later; the key is written in one place
 - `prefix x` -- close the focused sheet
 - `prefix o` -- move the focused sheet to the bottom
 - `prefix z` -- show the focused sheet full screen, and back
+- `prefix l` -- open the focused sheet's scrollback in an editor (see below)
 - `prefix q` -- quit
 - any other key -- sent to the focused sheet
 - `prefix prefix` -- send the prefix itself to the focused sheet (send-prefix)
@@ -81,6 +82,26 @@ stack comes up under the keyboard rather than the keyboard moving away.
 terminal while the others keep their places, and clearing the flag brings the
 same layout straight back. The title row marks the focused sheet with a `>`
 after the index, so both of these are visible in the frame alone.
+
+Copy mode (PoC)
+-------------
+
+`prefix l` is the first step of a tmux-like copy mode, kept simple for now: the
+focused sheet's scrollback -- the history the emulator has pushed off the top,
+followed by the rows still on screen -- is joined into text and handed to an
+external editor through its standard input. The editor is launched as
+`kk /dev/stdin` (see `../kk`), so it reads exactly that text as its file; what
+it does with the terminal afterwards is its own business. Selecting and copying
+live in the editor for now; tumu only collects the text and opens it.
+
+To hand the terminal over, tumu drops its `tuinix::TerminalDriver` (restoring
+raw mode, the alternate screen, and the cursor), runs the editor, and builds a
+fresh driver when the editor exits. The screen is repainted from scratch
+afterwards, because the editor painted over it.
+
+The editor program is fixed to `kk` by default and can be changed with
+`$TUMU_EDITOR`; the `/dev/stdin` argument is always used, so any editor that
+reads its file from standard input works.
 
 Mouse
 -----

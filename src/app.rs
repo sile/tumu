@@ -12,6 +12,12 @@
 //! [`Event::Mouse`](tumu::Event::Mouse), which is how a click moves focus. Paste
 //! and undecodable input are drained but not yet acted on.
 //!
+//! One command leaves the loop for a moment: `prefix l` hands the focused
+//! sheet's scrollback to an external editor. That is the one place the edge
+//! gives the terminal up and takes it back, so the handover -- dropping the
+//! driver, running the child, building a fresh driver -- lives in
+//! [`App::edit_scrollback`] and nowhere else.
+//!
 //! The loop is edge-triggered, following `termnix`'s contract: every session's
 //! pending work is drained with [`Session::needs_pump()`](termnix::Session::needs_pump)
 //! *before* blocking in `poll`, and the poll set is rebuilt from
@@ -22,11 +28,19 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 /// How long to wait for the rest of an escape sequence before a lone `ESC` byte
 /// is treated as the Escape key.
 const ESCAPE_TIMEOUT_MS: libc::c_int = 50;
+
+/// The argument that points the editor at the standard input it is fed.
+///
+/// The editor is launched as `<program> /dev/stdin`, so it opens `/dev/stdin`
+/// as the file to edit and reads exactly the text tumu writes to its standard
+/// input. Naming the file this way is what lets the PoC avoid a temporary file:
+/// the scrollback lives on a pipe and is never written to disk.
+const EDITOR_STDIN_PATH: &str = "/dev/stdin";
 
 /// Identifies one entry in the poll set, so a readiness result can be mapped
 /// back to what became ready.
@@ -61,6 +75,37 @@ impl ShellCommand {
     pub fn command(&self) -> Command {
         let mut command = Command::new(&self.program);
         command.args(&self.args);
+        command
+    }
+}
+
+/// The program the scrollback is handed to, and the argument that makes it read
+/// from standard input.
+///
+/// This mirrors [`ShellCommand`]: the recipe is a program and its arguments,
+/// not a live [`Command`], so a fresh one is built for each launch. The editor
+/// is treated as opaque -- tumu writes the scrollback to its standard input and
+/// does not care how it reads it -- so the only thing the recipe fixes is the
+/// `/dev/stdin` argument that ties the file it opens to the pipe tumu fills.
+#[derive(Debug, Clone)]
+pub struct EditorCommand {
+    program: PathBuf,
+}
+
+impl EditorCommand {
+    /// Builds an editor recipe from a program.
+    pub fn new(program: PathBuf) -> Self {
+        Self { program }
+    }
+
+    /// Builds a fresh [`Command`] that opens standard input as its file.
+    ///
+    /// The command is left with no standard streams set: the caller adds the
+    /// stdin pipe and lets the terminal streams be inherited, which is the
+    /// handover the editor needs.
+    pub fn command(&self) -> Command {
+        let mut command = Command::new(&self.program);
+        command.arg(EDITOR_STDIN_PATH);
         command
     }
 }
@@ -112,10 +157,19 @@ fn termnix_key(key: tuinix::KeyInput) -> termnix::KeyEvent {
 
 /// Owns the terminal edge and drives the core until every session is gone.
 pub struct App {
-    driver: tuinix::TerminalDriver,
+    /// The terminal driver, or `None` while an external editor owns the
+    /// terminal.
+    ///
+    /// It is an `Option` because the driver *is* the terminal takeover: to hand
+    /// the terminal to an editor, tumu has to drop it (which restores raw mode,
+    /// the alternate screen, and the cursor) and build a fresh one when the
+    /// editor returns. While it is `None` the poll loop still watches the
+    /// sessions, but nothing paints.
+    driver: Option<tuinix::TerminalDriver>,
     decoder: tuinix::InputDecoder,
     previous: Option<tuinix::Frame>,
     shell: ShellCommand,
+    editor: EditorCommand,
     state: tumu::State,
     sessions: HashMap<tumu::TermnixSessionId, termnix::Session>,
     next_session_id: std::num::NonZeroU64,
@@ -125,27 +179,45 @@ pub struct App {
 
 impl App {
     /// Takes over the terminal and prepares to run `shell` in every sheet.
-    pub fn new(state: tumu::State, shell: ShellCommand) -> std::io::Result<Self> {
-        let driver = tuinix::TerminalDriver::new()?;
+    pub fn new(
+        state: tumu::State,
+        shell: ShellCommand,
+        editor: EditorCommand,
+    ) -> std::io::Result<Self> {
+        let driver = take_terminal()?;
         let mut app = Self {
-            driver,
+            driver: Some(driver),
             decoder: tuinix::InputDecoder::new(),
             previous: None,
             shell,
+            editor,
             state,
             sessions: HashMap::new(),
             next_session_id: std::num::NonZeroU64::MIN,
             dirty: true,
             exit: false,
         };
-        // Mouse reporting is a convenience, not a requirement: a terminal that
-        // refuses it still works.
-        app.driver.enable_mouse_reporting()?;
+        app.driver_mut().enable_mouse_reporting()?;
         // The startup size arrives as a resize, so the first sheet is spawned
         // by the same path a later rotation takes.
-        let size = app.driver.size();
+        let size = app.driver().size();
         app.report_resize(size)?;
         Ok(app)
+    }
+
+    /// The terminal driver, which is present except while an editor owns the
+    /// terminal.
+    fn driver(&self) -> &tuinix::TerminalDriver {
+        self.driver
+            .as_ref()
+            .expect("the terminal is held except while an editor owns it")
+    }
+
+    /// The terminal driver, mutably.
+    fn driver_mut(&mut self) -> &mut tuinix::TerminalDriver {
+        self.driver
+            .as_mut()
+            .expect("the terminal is held except while an editor owns it")
     }
 
     /// Runs the poll loop until the core asks to leave or no session is left.
@@ -336,7 +408,7 @@ impl App {
     fn read_input(&mut self) -> std::io::Result<()> {
         let mut raw = [0u8; 1024];
         loop {
-            match self.driver.read(&mut raw) {
+            match self.driver_mut().read(&mut raw) {
                 Ok(0) => break,
                 Ok(n) => {
                     self.decoder.feed(&raw[..n]);
@@ -360,15 +432,15 @@ impl App {
 
     /// Applies a terminal resize: refreshes the cached size and tells the core.
     fn handle_resize(&mut self) -> std::io::Result<()> {
-        self.driver.handle_resize_signal()?;
-        let size = self.driver.size();
+        self.driver_mut().handle_resize_signal()?;
+        let size = self.driver().size();
         self.report_resize(size)
     }
 
     /// The poll fd for terminal input, tagged as [`Interest::Input`].
     fn input_poll_fd(&self) -> libc::pollfd {
         libc::pollfd {
-            fd: self.driver.input_fd(),
+            fd: self.driver().input_fd(),
             events: libc::POLLIN,
             revents: 0,
         }
@@ -377,7 +449,7 @@ impl App {
     /// The poll fd for resize signals, tagged as [`Interest::Resize`].
     fn resize_poll_fd(&self) -> libc::pollfd {
         libc::pollfd {
-            fd: self.driver.resize_signal_fd(),
+            fd: self.driver().resize_signal_fd(),
             events: libc::POLLIN,
             revents: 0,
         }
@@ -423,6 +495,7 @@ impl App {
                 }
                 tumu::Action::CloseSession { index } => self.close_session(index),
                 tumu::Action::SendToFocused { index, key } => self.send_to_focused(index, key),
+                tumu::Action::EditScrollback { index } => self.edit_scrollback(index)?,
                 tumu::Action::PrefixPending => {}
                 tumu::Action::Exit => self.exit = true,
             }
@@ -522,8 +595,8 @@ impl App {
         self.paint_sheet_contents(&mut frame);
         let cursor = self.focused_cursor();
         let out = frame.render(self.previous.as_ref(), cursor);
-        self.driver.write_all(&out)?;
-        self.driver.flush()?;
+        self.driver_mut().write_all(&out)?;
+        self.driver_mut().flush()?;
         self.previous = Some(frame);
         self.dirty = false;
         Ok(())
@@ -587,6 +660,144 @@ impl App {
             col: content.position.col + usize::from(cursor.col),
         })
     }
+
+    /// Hands the sheet's scrollback to the external editor.
+    ///
+    /// This is the copy-mode entry point: the scrollback of the sheet at
+    /// `index` -- the history the emulator has pushed off the top, followed by
+    /// the rows still on screen -- is turned into text and written to the
+    /// editor's standard input. The editor is launched as
+    /// `kk /dev/stdin`, so it opens `/dev/stdin` as its file and reads exactly
+    /// that text; what it does with the terminal afterwards is its own business.
+    ///
+    /// tumu owns the terminal, and the editor needs it, so the terminal is
+    /// handed over for the child's lifetime: the [`tuinix::TerminalDriver`] is
+    /// dropped (restoring raw mode, the alternate screen, and the cursor),
+    /// the child inherits the terminal on its own standard streams, and a fresh
+    /// driver is built once the child has exited. The fresh driver starts with
+    /// mouse reporting off, so it is re-requested the way startup requests it,
+    /// and the previous frame is thrown away, because the child painted over the
+    /// screen and a differential repaint against the old frame would skip rows
+    /// it thinks are still right. Rebuilding the driver and clearing the frame
+    /// is what makes the next paint a full one.
+    ///
+    /// A sheet with no session is left alone: there is nothing to read, so
+    /// there is nothing to open. The index is one of the core's own and always
+    /// names a sheet, so it is only the missing session that can stop this.
+    fn edit_scrollback(&mut self, index: usize) -> std::io::Result<()> {
+        let Some(text) = self.scrollback_text(index) else {
+            return Ok(());
+        };
+
+        // Give the terminal back before the child starts, and take it again
+        // after: the two brackets are the whole of the handover.
+        self.driver = None;
+        let status = self.run_editor(&text);
+        self.driver = Some(take_terminal()?);
+        // A fresh driver starts with mouse reporting off, so it is re-requested
+        // here exactly as at startup. It is a convenience, not a requirement,
+        // so a refusal is swallowed rather than fatal.
+        let _ = self.driver_mut().enable_mouse_reporting();
+        // The child painted over the screen, so the old frame is not a valid
+        // baseline for a differential repaint: dropping it forces a full one.
+        self.previous = None;
+        self.dirty = true;
+
+        // The editor's exit code is not tumu's to act on -- the scrollback is
+        // not written back -- so a failure to launch or wait is reported and
+        // swallowed. The file's own state is unchanged either way, and the user
+        // is back in tumu with the stack intact.
+        if let Err(err) = status {
+            eprintln!("tumu: editor: {err}");
+        }
+        Ok(())
+    }
+
+    /// Runs the external editor on `text`, feeding it on standard input.
+    ///
+    /// The write happens on its own thread so a scrollback larger than the pipe
+    /// buffer cannot deadlock the wait: the child drains the pipe as it reads
+    /// its file, and this thread blocks only until the last byte is handed over.
+    /// The child inherits tumu's standard streams -- the terminal, since the
+    /// driver was dropped first -- so it can paint its own UI. Its standard
+    /// input is the pipe instead, which is the file it is asked to open.
+    fn run_editor(&self, text: &str) -> std::io::Result<std::process::ExitStatus> {
+        let mut child = self.editor.command().stdin(Stdio::piped()).spawn()?;
+
+        let mut stdin = child
+            .stdin
+            .take()
+            .expect("stdin was requested as a pipe, so it is present");
+        let bytes = text.as_bytes().to_vec();
+        let writer = std::thread::spawn(move || {
+            // A short read is fine only when the child stopped reading; there
+            // is nothing left to do about it from here, so the error is dropped
+            // and the child's exit status is what the caller sees.
+            let _ = stdin.write_all(&bytes);
+            // Dropping `stdin` closes the write end, which is the EOF the child
+            // waits for.
+        });
+
+        let status = child.wait();
+        // The child cannot exit before its input is closed, but joining here
+        // keeps the thread from outliving the call if it ever could.
+        let _ = writer.join();
+        status
+    }
+
+    /// Builds the text of the sheet's scrollback: history first, then the rows
+    /// still on screen.
+    ///
+    /// The two halves come from the same emulator but are laid out
+    /// differently: a retained [`termnix::ScrollbackLine`] keeps the width it
+    /// had when it was scrolled off, while the visible rows are reflowed to the
+    /// current size. Both are rows of cells, so both join the same way -- cells
+    /// left to right, trailing blanks trimmed, rows joined by newlines -- and a
+    /// width-0 cell (the trailing half of a wide glyph) contributes nothing of
+    /// its own.
+    ///
+    /// Returns `None` when the sheet has no session to read from, so there is
+    /// nothing to open.
+    fn scrollback_text(&self, index: usize) -> Option<String> {
+        let session_id = self.session_at(index)?;
+        let session = self.sessions.get(&session_id)?;
+        let terminal = session.terminal_state();
+
+        let mut rows: Vec<String> = Vec::new();
+        for line in terminal.scrollback_lines() {
+            rows.push(row_text(line.cells()));
+        }
+        for row in terminal.rows() {
+            rows.push(row_text(row));
+        }
+        Some(rows.join("\n"))
+    }
+}
+
+/// Renders one row of cells as text, trailing blanks trimmed.
+///
+/// A width-0 cell is the trailing half of a wide glyph and stands for no
+/// character of its own, so it is skipped; every other cell contributes its
+/// glyph. The result is trimmed of trailing spaces, so a row padded to the
+/// terminal's width reads as the line it holds.
+fn row_text(cells: &[termnix::Cell]) -> String {
+    let mut line = String::new();
+    for cell in cells {
+        if cell.width == 0 {
+            continue;
+        }
+        line.push(cell.ch);
+    }
+    line.trim_end().to_string()
+}
+
+/// Takes over the terminal with a fresh [`tuinix::TerminalDriver`].
+///
+/// Only one driver may exist at a time, so this is also the assertion that the
+/// previous one was dropped: a driver still alive here is a bug in the handover
+/// order, not a condition to recover from.
+fn take_terminal() -> std::io::Result<tuinix::TerminalDriver> {
+    tuinix::TerminalDriver::new()
 }
 
 /// Waits for readiness on any of `fds`, up to `timeout` milliseconds.

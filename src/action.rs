@@ -45,6 +45,18 @@ pub enum Action {
         key: tuinix::KeyInput,
     },
 
+    /// Hand the scrollback of the sheet at `index` to an external editor.
+    ///
+    /// The action names *which* sheet, not *what* to show it: the scrollback
+    /// lives in the `termnix` session the sheet hosts, which only the edge
+    /// holds, so the edge reads it out and passes it on. The core only decides
+    /// that the focused sheet's history is what should be opened, exactly as it
+    /// resolves focus for every other action.
+    EditScrollback {
+        /// The sheet whose scrollback should be opened.
+        index: usize,
+    },
+
     /// The prefix latch is now armed and waiting for the next key.
     ///
     /// Nothing has to be done with it yet; it is reported so the edge can show

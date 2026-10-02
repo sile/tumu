@@ -205,6 +205,7 @@ impl State {
             Command::CloseSheet => self.handle_close_sheet(),
             Command::RotateSheets => self.handle_rotate_sheets(),
             Command::ToggleFullScreen => self.handle_toggle_full_screen(),
+            Command::EditScrollback => self.handle_edit_scrollback(),
             Command::Quit => {
                 self.exit = true;
                 vec![Action::Exit]
@@ -262,6 +263,24 @@ impl State {
         self.focused = successor(self.stack.sheets(), index)
             .or_else(|| self.stack.sheets().first().map(|(id, _)| *id));
         self.resize_actions()
+    }
+
+    /// Asks the edge to open the focused sheet's scrollback in an editor.
+    ///
+    /// The core names the sheet and stops there: the scrollback belongs to the
+    /// `termnix` session the sheet hosts, which the core does not hold, so the
+    /// edge reads it out and hands it on. Focus is resolved here, as for every
+    /// other action, so a rotation moves the keyboard *and* the history a later
+    /// `prefix l` opens together.
+    ///
+    /// Nothing in the state changes: opening the scrollback is not a view of
+    /// tumu's own, so the stack, the focus, and the full-screen flag are left as
+    /// they were. An empty stack has nothing to open, so it is a no-op.
+    fn handle_edit_scrollback(&mut self) -> Vec<Action> {
+        let Some(index) = self.focused_index() else {
+            return Vec::new();
+        };
+        vec![Action::EditScrollback { index }]
     }
 
     /// Flips full screen and resizes every sheet to match the new layout.

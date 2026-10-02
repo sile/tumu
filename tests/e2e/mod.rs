@@ -52,6 +52,20 @@ impl TumuHarness {
         })
     }
 
+    /// Launches the `tumu` binary with `$SHELL` and `$TUMU_EDITOR` pinned.
+    ///
+    /// The sheet runs `$SHELL -l` and `prefix l` runs `$TUMU_EDITOR /dev/stdin`,
+    /// so pointing the two at scripts makes both a sheet's output and the
+    /// scrollback handoff something a test can assert on.
+    pub fn with_shell_and_editor(rows: u16, cols: u16, shell: &str, editor: &str) -> Self {
+        let shell = shell.to_string();
+        let editor = editor.to_string();
+        Self::spawn(rows, cols, move |command| {
+            command.env("SHELL", shell);
+            command.env("TUMU_EDITOR", editor);
+        })
+    }
+
     /// Launches the binary, letting `setup` adjust the command first.
     fn spawn<F>(rows: u16, cols: u16, setup: F) -> Self
     where

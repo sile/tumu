@@ -178,6 +178,56 @@ fn the_quit_command_sets_exit_and_returns_it() {
 }
 
 #[test]
+fn the_edit_scrollback_command_names_the_focused_sheet() {
+    let mut state = state_with(24, 80, 2);
+
+    let actions = run_command(&mut state, 'l');
+
+    // The core names the sheet and stops: the scrollback belongs to the live
+    // session, which only the edge holds, so the action carries an index and
+    // not the text.
+    assert_eq!(actions, vec![tumu::Action::EditScrollback { index: 0 }]);
+}
+
+#[test]
+fn editing_the_scrollback_leaves_the_stack_alone() {
+    let mut state = state_with(24, 80, 2);
+    let before = state.stack.sheets().to_vec();
+    let focused = state.focused;
+
+    run_command(&mut state, 'l');
+
+    // Opening the scrollback is not a view of tumu's own: nothing on the stack
+    // moved, focus stayed put, and the loop is not asked to stop.
+    assert_eq!(state.stack.sheets(), before.as_slice());
+    assert_eq!(state.focused, focused);
+    assert!(!state.full_screen);
+    assert!(!state.exit);
+}
+
+#[test]
+fn editing_the_scrollback_follows_focus() {
+    let mut state = state_with(24, 80, 3);
+    // Focus the bottom sheet, so the index named is not the top of the stack.
+    let bottom = state.stack.sheets()[2].0;
+    state.focused = Some(bottom);
+
+    let actions = run_command(&mut state, 'l');
+
+    assert_eq!(actions, vec![tumu::Action::EditScrollback { index: 2 }]);
+}
+
+#[test]
+fn editing_the_scrollback_on_an_empty_stack_does_nothing() {
+    let mut state = state_with(24, 80, 1);
+    run_command(&mut state, 'x');
+
+    let actions = run_command(&mut state, 'l');
+
+    assert!(actions.is_empty());
+}
+
+#[test]
 fn a_forwarded_key_is_dropped_when_there_is_no_sheet() {
     let mut state = tumu::State::new(size(24, 80));
 
