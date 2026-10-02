@@ -1,15 +1,15 @@
-//! Identifiers for windows and the sessions they host.
+//! Identifiers for sheets and the sessions they host.
 //!
 //! Each id wraps a [`NonZeroU64`](std::num::NonZeroU64) so an id is never zero
 //! and the `Option<Id>` niche is free.
 
 use std::num::NonZeroU64;
 
-/// Addresses a window within a [`Stack`](crate::Stack).
+/// Addresses a [`Sheet`](crate::Sheet) within a [`Stack`](crate::Stack).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct WindowId(NonZeroU64);
+pub struct SheetId(NonZeroU64);
 
-impl WindowId {
+impl SheetId {
     /// Builds an id from a non-zero number.
     pub const fn new(value: NonZeroU64) -> Self {
         Self(value)
@@ -21,10 +21,10 @@ impl WindowId {
     }
 }
 
-/// Names the `termnix` session a window hosts.
+/// Names the `termnix` session a sheet hosts.
 ///
 /// The name carries the dependency it comes from, because a session is not a
-/// concept of the stack: it is the live child process a window happens to
+/// concept of the stack: it is the live child process a sheet happens to
 /// display, and the edge owns the [`termnix::Session`] this id refers to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TermnixSessionId(NonZeroU64);

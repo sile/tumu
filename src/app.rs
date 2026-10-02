@@ -7,7 +7,7 @@
 //! takes plain values and returns plain values, and never calls back into here.
 //!
 //! The PoC has no key handling yet: it takes over the terminal, spawns one
-//! window, re-lays the stack out on resize, and repaints. That is enough to
+//! sheet, re-lays the stack out on resize, and repaints. That is enough to
 //! prove the model against a real terminal.
 
 use std::collections::HashMap;
@@ -20,7 +20,7 @@ use std::process::Command;
 /// is treated as the Escape key.
 const ESCAPE_TIMEOUT_MS: libc::c_int = 50;
 
-/// The program and arguments to run in a window, rebuilt per spawn.
+/// The program and arguments to run in a sheet, rebuilt per spawn.
 #[derive(Debug, Clone)]
 pub struct ShellCommand {
     program: PathBuf,
@@ -58,7 +58,7 @@ pub struct App {
 }
 
 impl App {
-    /// Takes over the terminal and prepares to run `shell` in every window.
+    /// Takes over the terminal and prepares to run `shell` in every sheet.
     pub fn new(state: tumu::State, shell: ShellCommand) -> std::io::Result<Self> {
         let driver = tuinix::TerminalDriver::new()?;
         let mut app = Self {
@@ -74,7 +74,7 @@ impl App {
         // Mouse reporting is a convenience, not a requirement: a terminal that
         // refuses it still works.
         app.driver.enable_mouse_reporting()?;
-        // The startup size arrives as a resize, so the first window is spawned
+        // The startup size arrives as a resize, so the first sheet is spawned
         // by the same path a later rotation takes.
         let size = app.driver.size();
         app.report_resize(size)?;
@@ -166,15 +166,15 @@ impl App {
         Ok(())
     }
 
-    /// Spawns a session for the window at `index` and attaches it.
+    /// Spawns a session for the sheet at `index` and attaches it.
     ///
-    /// The PTY is sized to the window's *content* region, the rows below the
+    /// The PTY is sized to the sheet's *content* region, the rows below the
     /// title, so the title row never costs the child a row it cannot use.
     fn spawn_session(&mut self, index: usize) -> std::io::Result<()> {
         let Some(region) = self.state.stack.region_of(index, self.state.size) else {
             return Ok(());
         };
-        let content = tumu::window_content_region(region);
+        let content = tumu::sheet_content_region(region);
         let Some(size) = tumu::terminal_size_to_cell_size(content.size) else {
             return Ok(());
         };
@@ -189,7 +189,7 @@ impl App {
         Ok(())
     }
 
-    /// Resizes the session hosted by the window at `index`.
+    /// Resizes the session hosted by the sheet at `index`.
     fn resize_session(&mut self, index: usize, size: termnix::Size) {
         let Some(id) = self.session_at(index) else {
             return;
@@ -201,7 +201,7 @@ impl App {
         }
     }
 
-    /// Closes the session hosted by the window at `index`.
+    /// Closes the session hosted by the sheet at `index`.
     fn close_session(&mut self, index: usize) {
         if let Some(id) = self.session_at(index) {
             self.sessions.remove(&id);
@@ -209,13 +209,13 @@ impl App {
         self.dirty = true;
     }
 
-    /// Returns the session id attached to the window at `index`.
+    /// Returns the session id attached to the sheet at `index`.
     fn session_at(&self, index: usize) -> Option<tumu::TermnixSessionId> {
         self.state
             .stack
-            .windows()
+            .sheets()
             .get(index)
-            .and_then(|(_, window)| window.session)
+            .and_then(|(_, sheet)| sheet.session)
     }
 
     /// Paints the chrome and writes only what changed to the terminal.

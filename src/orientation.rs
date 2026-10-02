@@ -15,10 +15,10 @@
 /// The direction a stack grows in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Orientation {
-    /// Windows are laid out top to bottom, each taking rows.
+    /// Sheets are laid out top to bottom, each taking rows.
     Vertical,
 
-    /// Windows are laid out left to right, each taking columns.
+    /// Sheets are laid out left to right, each taking columns.
     Horizontal,
 }
 

@@ -7,10 +7,10 @@
 mod e2e;
 
 #[test]
-fn tumu_starts_and_paints_a_window_title() {
+fn tumu_starts_and_paints_a_sheet_title() {
     let mut tumu = e2e::TumuHarness::open();
 
-    // The single startup window is window 0, and the derived size is the whole
+    // The single startup sheet is sheet 0, and the derived size is the whole
     // terminal.
     tumu.wait_for_text("[0] 24x80");
 }

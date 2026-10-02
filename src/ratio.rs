@@ -1,15 +1,15 @@
 //! The odds a stack splits by: a plain rational, kept exact.
 //!
 //! A stack splits what is left at each step in the proportion `num : den` --
-//! `ratio` standing for the window at hand and `1` for every window below it.
-//! Keeping the two sides as whole numbers, rather than a float or a per-window
+//! `ratio` standing for the sheet at hand and `1` for every sheet below it.
+//! Keeping the two sides as whole numbers, rather than a float or a per-sheet
 //! weight, is what makes the arrangement independent of the terminal's size: a
 //! rotation changes the rows being divided, not the odds dividing them, so the
 //! same ratio yields the same shape at any size.
 
-/// The odds one window claims against the space still below it.
+/// The odds one sheet claims against the space still below it.
 ///
-/// A ratio of `num : den` splits the rows left at each step so the window at
+/// A ratio of `num : den` splits the rows left at each step so the sheet at
 /// hand takes `num` parts and everything below takes `den`. The default of
 /// `1 : 1` is the halving the README spells out. The value is a plain fraction
 /// and is not normalised, so equal odds can be written several ways and
@@ -17,15 +17,15 @@
 /// the size derivation depends on the fields being reduced.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Ratio {
-    /// The parts the window at hand claims.
+    /// The parts the sheet at hand claims.
     pub num: u32,
 
-    /// The parts every window below it claims together.
+    /// The parts every sheet below it claims together.
     pub den: u32,
 }
 
 impl Ratio {
-    /// The odds the README gives: a window against all the rest, `1 : 1`.
+    /// The odds the README gives: a sheet against all the rest, `1 : 1`.
     pub const DEFAULT: Self = Self { num: 1, den: 1 };
 
     /// Makes a ratio of `num : den`.
@@ -42,11 +42,11 @@ impl Ratio {
         }
     }
 
-    /// Returns the share of `rows` the window at hand claims.
+    /// Returns the share of `rows` the sheet at hand claims.
     ///
-    /// This is `rows * num / (num + den)`, rounded up, so a window always gets
+    /// This is `rows * num / (num + den)`, rounded up, so a sheet always gets
     /// at least one row of the odd remainder unless `num` is zero. A ratio of
-    /// `1 : 1` halves the rows and rounds the odd one to the window on top.
+    /// `1 : 1` halves the rows and rounds the odd one to the sheet on top.
     pub fn share_of(self, rows: usize) -> usize {
         let total = u64::from(self.num) + u64::from(self.den);
         if total == 0 || self.num == 0 {

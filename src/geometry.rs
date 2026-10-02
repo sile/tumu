@@ -34,7 +34,7 @@ pub fn terminal_size_to_cell_size(size: tuinix::Size) -> Option<termnix::Size> {
 
 /// Returns the region covering a whole terminal of `size`.
 ///
-/// The origin is `(0, 0)`, so this is the display a stack of one window fills.
+/// The origin is `(0, 0)`, so this is the display a stack of one sheet fills.
 pub fn terminal_region(size: tuinix::Size) -> tuinix::Region {
     tuinix::Region {
         position: tuinix::Position { row: 0, col: 0 },

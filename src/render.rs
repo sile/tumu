@@ -7,12 +7,12 @@
 
 use crate::State;
 
-/// Returns the region of a window's content inside `region`.
+/// Returns the region of a sheet's content inside `region`.
 ///
 /// The content sits one row below the top of the region, leaving that row for a
 /// title. A region one row tall therefore has no content rows, which is how a
-/// collapsed window is drawn: its single row is the title alone.
-pub fn window_content_region(region: tuinix::Region) -> tuinix::Region {
+/// collapsed sheet is drawn: its single row is the title alone.
+pub fn sheet_content_region(region: tuinix::Region) -> tuinix::Region {
     tuinix::Region {
         position: tuinix::Position {
             row: region.position.row + 1,
@@ -27,7 +27,7 @@ pub fn window_content_region(region: tuinix::Region) -> tuinix::Region {
 
 /// Paints `state` into a fresh frame of the state's size.
 ///
-/// For the PoC, each window is drawn as its title row: the position in the
+/// For the PoC, each sheet is drawn as its title row: the position in the
 /// stack, so the ordering and the derived sizes are visible without a live
 /// session behind them. Painting the sessions' grids into the content regions is
 /// the edge's job, because only it holds them.

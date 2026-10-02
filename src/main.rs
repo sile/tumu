@@ -45,7 +45,7 @@ fn main() -> noargs::Result<()> {
     Ok(())
 }
 
-/// Builds the recipe for the shell tumu runs in every window: the user's login
+/// Builds the recipe for the shell tumu runs in every sheet: the user's login
 /// shell.
 ///
 /// `$SHELL` is preferred and falls back to `/bin/sh`, so tumu starts the same

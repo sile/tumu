@@ -27,7 +27,7 @@ fn the_default_share_halves_and_rounds_up() {
 }
 
 #[test]
-fn a_larger_numerator_grows_the_top_window() {
+fn a_larger_numerator_grows_the_top_sheet() {
     let ratio = Ratio::new(3, 1).expect("3:1");
 
     // Three parts in four of 24 is 18.

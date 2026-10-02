@@ -31,7 +31,7 @@ fn the_renderer_never_paints_outside_the_frame() {
 }
 
 #[test]
-fn a_title_row_names_each_window() {
+fn a_title_row_names_each_sheet() {
     let mut state = tumu::State::new(size(24, 80));
     state.stack.push_top();
 

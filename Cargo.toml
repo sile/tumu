@@ -3,7 +3,7 @@ name = "tumu"
 version = "0.0.1"
 edition = "2024"
 publish = false
-description = "A terminal multiplexer with stacked windows"
+description = "A terminal multiplexer with stacked sheets"
 
 [dependencies]
 libc = "0.2"
