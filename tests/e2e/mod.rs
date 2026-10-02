@@ -56,6 +56,29 @@ impl TumuHarness {
         self.cols = cols;
     }
 
+    /// Sends one key chord to `tumu`, as a real terminal would.
+    ///
+    /// The key is enqueued through `termnix`, so it is encoded with the modes
+    /// `tumu` has set -- the same path a real keypress takes.
+    pub fn send_key(&mut self, key: termnix::KeyEvent) {
+        self.session
+            .enqueue_input(termnix::Input::Key(key))
+            .expect("failed to enqueue a key");
+    }
+
+    /// Sends the prefix chord (`C-q`).
+    pub fn send_prefix(&mut self) {
+        self.send_key(termnix::KeyEvent {
+            code: termnix::KeyCode::Char('q'),
+            modifiers: termnix::Modifiers::new().ctrl(),
+        });
+    }
+
+    /// Sends a bare character key.
+    pub fn send_char(&mut self, ch: char) {
+        self.send_key(termnix::KeyEvent::new(termnix::KeyCode::Char(ch)));
+    }
+
     /// Reads the visible grid back as one trimmed string per row.
     pub fn screen_rows(&self) -> Vec<String> {
         let state = self.session.terminal_state();

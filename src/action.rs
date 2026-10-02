@@ -27,6 +27,23 @@ pub enum Action {
         index: usize,
     },
 
+    /// Send a key to the session hosted by the focused sheet.
+    ///
+    /// The key is carried undecoded, exactly as it arrived, because re-encoding
+    /// it for the child is the edge's job and belongs to `termnix`, which knows
+    /// the child's terminal modes. The core only decides *that* the key is the
+    /// focused sheet's to receive.
+    SendToFocused {
+        /// The key to forward.
+        key: tuinix::KeyInput,
+    },
+
+    /// The prefix latch is now armed and waiting for the next key.
+    ///
+    /// Nothing has to be done with it yet; it is reported so the edge can show
+    /// that a command is pending, the way tmux marks the prefix.
+    PrefixPending,
+
     /// Leave the multiplexer.
     Exit,
 }

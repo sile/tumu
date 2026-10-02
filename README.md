@@ -54,3 +54,21 @@ $               |$  |   |
 - a sheet can be swaped to the top, or, move to the stop
 - support full screen mode (like tmux does)
 - c-o is the prefix for tumu commands
+
+Keys
+----
+
+The prefix is a latch, in the tmux style: press it, then one more key.
+
+> The prefix is `c-q` while tumu is under development, because `c-o` is also
+tmux's own prefix. It returns to `c-o` later; the key is written in one place
+(`src/input.rs`).
+
+- `prefix n` -- new sheet on top
+- `prefix x` -- close the focused sheet
+- `prefix o` -- move the focused sheet to the bottom
+- `prefix q` -- quit
+- any other key -- sent to the focused sheet
+- `prefix prefix` -- send the prefix itself to the focused sheet (send-prefix)
+
+The focused sheet is the top of the stack.

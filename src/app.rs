@@ -6,9 +6,10 @@
 //! input from, and paints frames to the terminal. The [`tumu`] core it drives
 //! takes plain values and returns plain values, and never calls back into here.
 //!
-//! The PoC has no key handling yet: it takes over the terminal, spawns one
-//! sheet, re-lays the stack out on resize, and repaints. That is enough to
-//! prove the model against a real terminal.
+//! Keys reach the core as [`Event::Key`](tumu::Event::Key): a key the prefix
+//! latch does not claim is forwarded to the focused sheet's session, and a
+//! latched key runs a command. Mouse, paste, and undecodable input are drained
+//! but not yet acted on.
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -45,6 +46,51 @@ impl ShellCommand {
     }
 }
 
+/// Converts a decoded `tuinix` key into the `termnix` event it stands for.
+///
+/// The two crates name the same keys in their own types, so this is the one
+/// place the mapping lives. A key that `termnix` cannot name -- the keypad
+/// codes `tuinix` does not produce, or a function key past `F(12)` -- is sent
+/// as an escape-free fallback: `BackTab` becomes `Tab` with Shift, and anything
+/// unmatched becomes the bare character when there is one, or nothing at all.
+/// Alt and Ctrl ride along as modifiers, which `termnix` re-encodes.
+fn termnix_key(key: tuinix::KeyInput) -> termnix::KeyEvent {
+    use tuinix::KeyCode;
+
+    let mut modifiers = termnix::Modifiers::new();
+    if key.ctrl {
+        modifiers = modifiers.ctrl();
+    }
+    if key.alt {
+        modifiers = modifiers.alt();
+    }
+
+    let code = match key.code {
+        KeyCode::Char(ch) => termnix::KeyCode::Char(ch),
+        KeyCode::Enter => termnix::KeyCode::Enter,
+        KeyCode::Tab => termnix::KeyCode::Tab,
+        KeyCode::BackTab => {
+            modifiers = modifiers.shift();
+            termnix::KeyCode::Tab
+        }
+        KeyCode::Backspace => termnix::KeyCode::Backspace,
+        KeyCode::Escape => termnix::KeyCode::Escape,
+        KeyCode::Up => termnix::KeyCode::Up,
+        KeyCode::Down => termnix::KeyCode::Down,
+        KeyCode::Left => termnix::KeyCode::Left,
+        KeyCode::Right => termnix::KeyCode::Right,
+        KeyCode::Home => termnix::KeyCode::Home,
+        KeyCode::End => termnix::KeyCode::End,
+        KeyCode::PageUp => termnix::KeyCode::PageUp,
+        KeyCode::PageDown => termnix::KeyCode::PageDown,
+        KeyCode::Insert => termnix::KeyCode::Insert,
+        KeyCode::Delete => termnix::KeyCode::Delete,
+        KeyCode::F(n) => termnix::KeyCode::Function(n),
+    };
+
+    termnix::KeyEvent { code, modifiers }
+}
+
 /// Owns the terminal edge and drives the core until every session is gone.
 pub struct App {
     driver: tuinix::TerminalDriver,
@@ -55,6 +101,7 @@ pub struct App {
     sessions: HashMap<tumu::TermnixSessionId, termnix::Session>,
     next_session_id: std::num::NonZeroU64,
     dirty: bool,
+    exit: bool,
 }
 
 impl App {
@@ -70,6 +117,7 @@ impl App {
             sessions: HashMap::new(),
             next_session_id: std::num::NonZeroU64::MIN,
             dirty: true,
+            exit: false,
         };
         // Mouse reporting is a convenience, not a requirement: a terminal that
         // refuses it still works.
@@ -81,9 +129,12 @@ impl App {
         Ok(app)
     }
 
-    /// Runs the poll loop until no session is left.
+    /// Runs the poll loop until the core asks to leave or no session is left.
+    ///
+    /// A `quit` command sets [`App::exit`]; the loop also stops on its own when
+    /// the last session goes, so a stack the user emptied still returns.
     pub fn run(&mut self) -> std::io::Result<()> {
-        while !self.sessions.is_empty() {
+        while !self.exit && !self.sessions.is_empty() {
             if self.dirty {
                 self.render()?;
             }
@@ -142,9 +193,23 @@ impl App {
             if let Ok(n) = self.driver.read(&mut raw) {
                 self.decoder.feed(&raw[..n]);
             }
-            // The PoC does not act on keys yet; draining keeps the decoder from
-            // holding an uncommitted escape forever.
-            while self.decoder.next().is_some() {}
+            while let Some(input) = self.decoder.next() {
+                self.handle_input(input)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Turns one decoded input into core actions and carries them out.
+    ///
+    /// Only keys reach the core for now: a mouse report, a paste, and an
+    /// undecodable sequence are all dropped where they arrive. Forwarding a
+    /// paste and a mouse event is a later change; until then the decoder must
+    /// still be drained, or a lone escape would never commit.
+    fn handle_input(&mut self, input: tuinix::Input) -> std::io::Result<()> {
+        if let tuinix::Input::Key(key) = input {
+            let actions = self.state.update(tumu::Event::Key(key));
+            self.dispatch(actions)?;
         }
         Ok(())
     }
@@ -152,6 +217,14 @@ impl App {
     /// Reports a display size to the core and carries out what it returns.
     fn report_resize(&mut self, size: tuinix::Size) -> std::io::Result<()> {
         let actions = self.state.update(tumu::Event::Resize(size));
+        self.dispatch(actions)
+    }
+
+    /// Carries out a batch of core actions.
+    ///
+    /// Every action that changes what a sheet shows marks the frame dirty, so
+    /// one pass over a batch repaints once rather than per action.
+    fn dispatch(&mut self, actions: Vec<tumu::Action>) -> std::io::Result<()> {
         for action in actions {
             match action {
                 tumu::Action::SpawnSession { index } => self.spawn_session(index)?,
@@ -159,7 +232,9 @@ impl App {
                     self.resize_session(index, size);
                 }
                 tumu::Action::CloseSession { index } => self.close_session(index),
-                tumu::Action::Exit => {}
+                tumu::Action::SendToFocused { key } => self.send_to_focused(key),
+                tumu::Action::PrefixPending => {}
+                tumu::Action::Exit => self.exit = true,
             }
         }
         self.dirty = true;
@@ -187,6 +262,27 @@ impl App {
         self.state.stack.attach_session(index, id);
         self.dirty = true;
         Ok(())
+    }
+
+    /// Sends `key` to the focused sheet's session.
+    ///
+    /// The focused sheet is the top of the stack; a separate focus field is a
+    /// later addition. `termnix` turns the logical key into PTY bytes using the
+    /// child's own terminal modes, which is why the key is converted here rather
+    /// than as raw bytes.
+    fn send_to_focused(&mut self, key: tuinix::KeyInput) {
+        let Some(id) = self.session_at(0) else {
+            return;
+        };
+        let Some(session) = self.sessions.get_mut(&id) else {
+            return;
+        };
+        if session
+            .enqueue_input(termnix::Input::Key(termnix_key(key)))
+            .is_ok()
+        {
+            self.dirty = true;
+        }
     }
 
     /// Resizes the session hosted by the sheet at `index`.
