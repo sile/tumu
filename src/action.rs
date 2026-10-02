@@ -33,7 +33,14 @@ pub enum Action {
     /// it for the child is the edge's job and belongs to `termnix`, which knows
     /// the child's terminal modes. The core only decides *that* the key is the
     /// focused sheet's to receive.
+    ///
+    /// The sheet is named by index, like every other action, so focus is
+    /// resolved in the core -- which is what lets the keyboard follow a
+    /// rotation -- rather than guessed at the edge.
     SendToFocused {
+        /// The sheet whose session should receive the key.
+        index: usize,
+
         /// The key to forward.
         key: tuinix::KeyInput,
     },

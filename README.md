@@ -67,8 +67,17 @@ tmux's own prefix. It returns to `c-o` later; the key is written in one place
 - `prefix n` -- new sheet on top
 - `prefix x` -- close the focused sheet
 - `prefix o` -- move the focused sheet to the bottom
+- `prefix z` -- show the focused sheet full screen, and back
 - `prefix q` -- quit
 - any other key -- sent to the focused sheet
 - `prefix prefix` -- send the prefix itself to the focused sheet (send-prefix)
 
-The focused sheet is the top of the stack.
+The focused sheet is the sheet the commands act on and the one the keyboard is
+sent to. A new sheet goes on top and takes the focus; `prefix o` and
+`prefix x` move it to the sheet that takes the focused one's place, so the
+stack comes up under the keyboard rather than the keyboard moving away.
+
+`prefix z` is a view, not a rearrangement: the focused sheet fills the
+terminal while the others keep their places, and clearing the flag brings the
+same layout straight back. The title row marks the focused sheet with a `>`
+after the index, so both of these are visible in the frame alone.

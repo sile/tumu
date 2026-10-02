@@ -45,6 +45,7 @@ pub fn resolve_command(key: tuinix::KeyInput) -> Option<Command> {
         (false, tuinix::KeyCode::Char('n')) => Command::NewSheet,
         (false, tuinix::KeyCode::Char('x')) => Command::CloseSheet,
         (false, tuinix::KeyCode::Char('o')) => Command::RotateSheets,
+        (false, tuinix::KeyCode::Char('z')) => Command::ToggleFullScreen,
         (false, tuinix::KeyCode::Char('q')) => Command::Quit,
         _ => return None,
     })

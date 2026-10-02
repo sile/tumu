@@ -7,10 +7,12 @@
 //!
 //! This crate holds everything that does not touch a file descriptor, a child
 //! process, or a clock: the stack model ([`Stack`]) with its size derivation,
-//! the state ([`State`]) with its pure handlers, and the renderer that paints a
-//! [`Frame`](tuinix::Frame) from that state. The one thing the core decides but
-//! does not perform is I/O: spawning children, reading and writing the terminal,
-//! and resizing the PTYs all happen at the edge in the binary's `app` module.
+//! the state ([`State`]) with its pure handlers -- including which sheet the
+//! commands act on and whether it is shown full screen -- and the renderer
+//! that paints a [`Frame`](tuinix::Frame) from that state. The one thing the
+//! core decides but does not perform is I/O: spawning children, reading and
+//! writing the terminal, and resizing the PTYs all happen at the edge in the
+//! binary's `app` module.
 //! The core hands back plain values -- the region a sheet should occupy, the
 //! frame to draw -- and is driven entirely by calls from the edge.
 

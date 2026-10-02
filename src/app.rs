@@ -232,7 +232,7 @@ impl App {
                     self.resize_session(index, size);
                 }
                 tumu::Action::CloseSession { index } => self.close_session(index),
-                tumu::Action::SendToFocused { key } => self.send_to_focused(key),
+                tumu::Action::SendToFocused { index, key } => self.send_to_focused(index, key),
                 tumu::Action::PrefixPending => {}
                 tumu::Action::Exit => self.exit = true,
             }
@@ -246,7 +246,7 @@ impl App {
     /// The PTY is sized to the sheet's *content* region, the rows below the
     /// title, so the title row never costs the child a row it cannot use.
     fn spawn_session(&mut self, index: usize) -> std::io::Result<()> {
-        let Some(region) = self.state.stack.region_of(index, self.state.size) else {
+        let Some(region) = self.state.region_of(index) else {
             return Ok(());
         };
         let content = tumu::sheet_content_region(region);
@@ -264,14 +264,14 @@ impl App {
         Ok(())
     }
 
-    /// Sends `key` to the focused sheet's session.
+    /// Sends `key` to the session of the sheet at `index`.
     ///
-    /// The focused sheet is the top of the stack; a separate focus field is a
-    /// later addition. `termnix` turns the logical key into PTY bytes using the
-    /// child's own terminal modes, which is why the key is converted here rather
-    /// than as raw bytes.
-    fn send_to_focused(&mut self, key: tuinix::KeyInput) {
-        let Some(id) = self.session_at(0) else {
+    /// The core resolved focus to this index before the action was returned, so
+    /// the edge just looks the sheet up. `termnix` turns the logical key into
+    /// PTY bytes using the child's own terminal modes, which is why the key is
+    /// converted here rather than as raw bytes.
+    fn send_to_focused(&mut self, index: usize, key: tuinix::KeyInput) {
+        let Some(id) = self.session_at(index) else {
             return;
         };
         let Some(session) = self.sessions.get_mut(&id) else {
@@ -283,6 +283,11 @@ impl App {
         {
             self.dirty = true;
         }
+        // Push the byte out now rather than leaving it queued. The keys in this
+        // batch were already pulled out of the input buffer, so there is no
+        // later read whose readiness would flush them; without this the child
+        // would sit on the byte until something else woke the loop.
+        let _ = session.pump_io(termnix::PumpBudget::default());
     }
 
     /// Resizes the session hosted by the sheet at `index`.

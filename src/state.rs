@@ -1,6 +1,24 @@
 //! The multiplexer state and its pure handlers.
 
-use crate::{Action, Command, Event, Stack};
+use crate::{Action, Command, Event, SheetId, Stack};
+
+/// The index of the top of the stack: where a new sheet is pushed.
+///
+/// A new sheet goes on top, so the spawn index is always zero; it is named so
+/// the commands that spawn a sheet do not each spell the same literal.
+const STACK_TOP: usize = 0;
+
+/// Returns the sheet that takes the place of the one that just left `index`.
+///
+/// The sheet that shifts down into the gap is the natural next focus, and the
+/// new bottom is the fallback when the sheet that left was the last so nothing
+/// shifted. `None` means the stack is now empty.
+fn successor(sheets: &[(SheetId, crate::Sheet)], index: usize) -> Option<SheetId> {
+    sheets
+        .get(index)
+        .or_else(|| sheets.last())
+        .map(|(id, _)| *id)
+}
 
 /// Everything the core knows: the stack, the terminal size it fills, and
 /// whether the prefix latch is armed.
@@ -26,6 +44,26 @@ pub struct State {
     /// [`handle_key`](State::handle_key) for the rule.
     pub prefix: bool,
 
+    /// Whether the focused sheet is shown full screen.
+    ///
+    /// Full screen is a *view*, not a rearrangement. It is a single flag rather
+    /// than a remembered region, so nothing has to be put back on the way out:
+    /// the other sheets were never moved and their regions are still a pure
+    /// function of the size, the order, and the ratio. It is deliberately not
+    /// transitive -- a resize keeps it, because the layout it hides is
+    /// re-derived either way; see [`handle_resize`](State::handle_resize).
+    pub full_screen: bool,
+
+    /// Which sheet the commands act on.
+    ///
+    /// It is a [`SheetId`], not an index, so a sheet keeps its identity as the
+    /// stack is reordered around it; [`focused_index`](State::focused_index)
+    /// turns it into a position. It is cleared the moment it would name a sheet
+    /// that is no longer in the stack -- see
+    /// [`handle_rotate_sheets`](State::handle_rotate_sheets) and
+    /// [`handle_session_exited`](State::handle_session_exited).
+    pub focused: Option<SheetId>,
+
     /// Whether the loop should stop.
     pub exit: bool,
 }
@@ -37,8 +75,24 @@ impl State {
             stack: Stack::new(),
             size,
             prefix: false,
+            full_screen: false,
+            focused: None,
             exit: false,
         }
+    }
+
+    /// Returns the index of the focused sheet, or `None` when there is none.
+    ///
+    /// The stack search is what keeps focus honest: a focus that names a sheet
+    /// the stack no longer holds reads as nothing focused rather than as a
+    /// stale index. The top of the stack is not a substitute for this, because
+    /// a rotation moves a sheet out from under the top.
+    pub fn focused_index(&self) -> Option<usize> {
+        let focused = self.focused?;
+        self.stack
+            .sheets()
+            .iter()
+            .position(|(id, _)| *id == focused)
     }
 
     /// Applies `event` and returns the actions the edge should carry out.
@@ -92,13 +146,15 @@ impl State {
 
     /// Forwards `key` to the focused sheet's session, or drops it.
     ///
-    /// The focused sheet is the top of the stack; a separate focus field is a
-    /// later addition. With no sheet to receive it the key is dropped.
+    /// Which sheet receives it is named by focus, not by position: the key is
+    /// delivered to the focused sheet even when it is not the top of the stack,
+    /// so rotating the stack moves the keyboard to the sheet that came up. With
+    /// no sheet to receive it the key is dropped.
     fn send_key(&self, key: tuinix::KeyInput) -> Vec<Action> {
-        if self.stack.is_empty() {
+        let Some(index) = self.focused_index() else {
             return Vec::new();
-        }
-        vec![Action::SendToFocused { key }]
+        };
+        vec![Action::SendToFocused { index, key }]
     }
 
     /// Carries a resolved command out, returning the actions it expands to.
@@ -107,6 +163,7 @@ impl State {
             Command::NewSheet => self.handle_new_sheet(),
             Command::CloseSheet => self.handle_close_sheet(),
             Command::RotateSheets => self.handle_rotate_sheets(),
+            Command::ToggleFullScreen => self.handle_toggle_full_screen(),
             Command::Quit => {
                 self.exit = true;
                 vec![Action::Exit]
@@ -120,8 +177,9 @@ impl State {
     /// the new sheet costs each of them rows; the spawn is named by index
     /// because the new sheet is on top.
     fn handle_new_sheet(&mut self) -> Vec<Action> {
-        self.stack.push_top();
-        let mut actions = vec![Action::SpawnSession { index: 0 }];
+        let id = self.stack.push_top();
+        self.focused = Some(id);
+        let mut actions = vec![Action::SpawnSession { index: STACK_TOP }];
         actions.extend(self.resize_actions());
         actions
     }
@@ -131,11 +189,14 @@ impl State {
     /// Does nothing when the stack is empty. The remaining sheets re-derive
     /// their regions, so closing one grows the rest.
     fn handle_close_sheet(&mut self) -> Vec<Action> {
-        if self.stack.is_empty() {
+        let Some(index) = self.focused_index() else {
             return Vec::new();
-        }
-        self.stack.remove(0);
-        let mut actions = vec![Action::CloseSession { index: 0 }];
+        };
+        self.stack.remove(index);
+        // The next sheet to show is the one that took the closed sheet's place,
+        // or the new bottom when the closed one was last.
+        self.focused = successor(self.stack.sheets(), index);
+        let mut actions = vec![Action::CloseSession { index }];
         actions.extend(self.resize_actions());
         actions
     }
@@ -146,10 +207,31 @@ impl State {
     /// sheet is a no-op. The regions swap with the order, so every session is
     /// resized.
     fn handle_rotate_sheets(&mut self) -> Vec<Action> {
+        let Some(index) = self.focused_index() else {
+            return Vec::new();
+        };
         if self.stack.len() <= 1 {
             return Vec::new();
         }
-        self.stack.move_to_bottom(0);
+        // Whichever sheet takes the focused one's place is focused next, so the
+        // rotation brings the stack up under the keyboard rather than moving the
+        // keyboard away. The focused sheet goes to the bottom, so rotating the
+        // top sheet leaves focus on the new top.
+        self.stack.move_to_bottom(index);
+        self.focused = successor(self.stack.sheets(), index)
+            .or_else(|| self.stack.sheets().first().map(|(id, _)| *id));
+        self.resize_actions()
+    }
+
+    /// Flips full screen and resizes every sheet to match the new layout.
+    ///
+    /// Neither capture nor restore touches the stack: the focused sheet's
+    /// region becomes the whole terminal, the other sheets keep their places and
+    /// fold back in when the flag clears. The resize is what makes a full-screen
+    /// sheet's session take the terminal over, and what hands the rows back to
+    /// the hidden sheets on the way out.
+    fn handle_toggle_full_screen(&mut self) -> Vec<Action> {
+        self.full_screen = !self.full_screen;
         self.resize_actions()
     }
 
@@ -160,12 +242,48 @@ impl State {
     /// same way a resize that produces one is.
     fn resize_actions(&self) -> Vec<Action> {
         let mut actions = Vec::new();
-        for (index, region) in self.stack.regions(self.size).into_iter().enumerate() {
+        for (index, region) in self.regions().into_iter().enumerate() {
             if let Some(grid) = crate::terminal_size_to_cell_size(region.size) {
                 actions.push(Action::ResizeSession { index, size: grid });
             }
         }
         actions
+    }
+
+    /// Returns the region of every visible sheet, in stack order.
+    ///
+    /// This is where full screen enters the layout: with it on, the focused
+    /// sheet takes the whole terminal and the others get no region at all,
+    /// which both stops the edge from drawing them and stops
+    /// [`resize_actions`](State::resize_actions) from resizing their sessions to
+    /// a zero grid. The regions the other sheets would have had are not lost --
+    /// they are the same pure function of the size, the order, and the ratio, so
+    /// clearing the flag brings them straight back.
+    ///
+    /// The returned vector is always as long as the stack; a sheet the full
+    /// screen hides has an empty region at its index rather than no entry, so an
+    /// index still names the same sheet whether or not it is on show.
+    pub fn regions(&self) -> Vec<tuinix::Region> {
+        if !self.full_screen {
+            return self.stack.regions(self.size);
+        }
+        let focused = self.focused_index();
+        let full = crate::terminal_region(self.size);
+        let empty = tuinix::Region {
+            position: full.position,
+            size: tuinix::Size { rows: 0, cols: 0 },
+        };
+        (0..self.stack.len())
+            .map(|index| if Some(index) == focused { full } else { empty })
+            .collect()
+    }
+
+    /// Returns the region of the sheet at `index`, in stack order.
+    ///
+    /// Returns `None` when there is no such sheet. A sheet the full screen
+    /// hides has an empty region, so it is nothing to draw.
+    pub fn region_of(&self, index: usize) -> Option<tuinix::Region> {
+        self.regions().into_iter().nth(index)
     }
 
     /// Records the new size and lays every sheet out again.
@@ -179,8 +297,9 @@ impl State {
         let mut actions = Vec::new();
 
         if self.stack.is_empty() {
-            self.stack.push_top();
-            actions.push(Action::SpawnSession { index: 0 });
+            let id = self.stack.push_top();
+            self.focused = Some(id);
+            actions.push(Action::SpawnSession { index: STACK_TOP });
         }
 
         actions.extend(self.resize_actions());
@@ -196,7 +315,14 @@ impl State {
         let Some(index) = self.stack.sheets().iter().position(|(s, _)| *s == id) else {
             return Vec::new();
         };
+        let was_focused = self.focused == Some(id);
         self.stack.remove(index);
+        if was_focused {
+            self.focused = successor(self.stack.sheets(), index);
+            // A sheet dying under full screen would leave nothing to show, so
+            // the flag clears rather than zoom the sheet that took its place.
+            self.full_screen = false;
+        }
         let mut actions = vec![Action::CloseSession { index }];
         actions.extend(self.resize_actions());
         actions

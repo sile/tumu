@@ -10,7 +10,7 @@ mod e2e;
 fn tumu_starts_and_paints_a_sheet_title() {
     let mut tumu = e2e::TumuHarness::open();
 
-    // The single startup sheet is sheet 0, and the derived size is the whole
-    // terminal.
-    tumu.wait_for_text("[0] 24x80");
+    // The single startup sheet is sheet 0, the derived size is the whole
+    // terminal, and it is focused -- hence the marker after the index.
+    tumu.wait_for_text("[0]>24x80");
 }

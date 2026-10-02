@@ -4,6 +4,13 @@ mod helpers_tuinix;
 
 use helpers_tuinix::size;
 
+/// Builds a state whose first sheet is focused, as startup leaves it.
+fn started(rows: usize, cols: usize) -> tumu::State {
+    let mut state = tumu::State::new(size(rows, cols));
+    state.update(tumu::Event::Resize(size(rows, cols)));
+    state
+}
+
 #[test]
 fn the_renderer_never_paints_outside_the_frame() {
     let seed = noprop::seed_from_env_or_time("TUMU_SEED").expect("seed");
@@ -32,8 +39,7 @@ fn the_renderer_never_paints_outside_the_frame() {
 
 #[test]
 fn a_title_row_names_each_sheet() {
-    let mut state = tumu::State::new(size(24, 80));
-    state.stack.push_top();
+    let state = started(24, 80);
 
     let frame = tumu::frame(&state);
     let first_row: String = frame

@@ -1,5 +1,9 @@
 //! Painting the stack into a [`Frame`](tuinix::Frame).
 //!
+//! The layout comes from [`State::regions`](crate::State::regions), never from
+//! the stack directly: that one call is where full screen narrows the drawing to
+//! the focused sheet, so the renderer needs no rule of its own for it.
+//!
 //! Drawing is free of I/O: it reads a [`State`](crate::State) and writes into a
 //! frame, so a test can assert on the frame as data. What the edge does with the
 //! frame -- comparing it to the last one and writing the terminal -- is the
@@ -29,12 +33,23 @@ pub fn sheet_content_region(region: tuinix::Region) -> tuinix::Region {
 ///
 /// For the PoC, each sheet is drawn as its title row: the position in the
 /// stack, so the ordering and the derived sizes are visible without a live
-/// session behind them. Painting the sessions' grids into the content regions is
-/// the edge's job, because only it holds them.
+/// session behind them. The title marks the focused sheet -- the one the
+/// keyboard is aimed at -- so a rotation or a full-screen toggle is visible in
+/// the frame alone. Painting the sessions' grids into the content regions is the
+/// edge's job, because only it holds them.
 pub fn frame(state: &State) -> tuinix::Frame {
     let mut frame = tuinix::Frame::new(state.size);
-    for (index, region) in state.stack.regions(state.size).into_iter().enumerate() {
-        let title = format!("[{}] {}x{}", index, region.size.rows, region.size.cols);
+    let focused = state.focused_index();
+    for (index, region) in state.regions().into_iter().enumerate() {
+        // A sheet the full screen hides has no region, so there is no row to
+        // title.
+        if region.size.rows == 0 || region.size.cols == 0 {
+            continue;
+        }
+        // Focus leads the title, so it survives a narrow region that clips the
+        // rest: a `[1]` there may be all that is left after the marker.
+        let marker = if Some(index) == focused { ">" } else { " " };
+        let title = format!("[{index}]{marker}{}x{}", region.size.rows, region.size.cols);
         let right = region.position.col + region.size.cols;
         let mut position = region.position;
         for ch in title.chars() {
