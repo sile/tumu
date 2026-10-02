@@ -18,6 +18,19 @@ pub enum Event {
     /// the edge's work.
     Key(tuinix::KeyInput),
 
+    /// A mouse event happened on the host terminal.
+    ///
+    /// The position is what makes this event worth carrying to the core: it is
+    /// already in terminal cells, so deciding *which sheet was clicked* stays in
+    /// the core, next to the layout that produced the regions. Reading the
+    /// report and decoding it is the edge's work.
+    ///
+    /// The whole [`tuinix::MouseInput`] rides along -- kind, position, and
+    /// modifiers -- so a later gesture (a scroll, a modifier-click) does not
+    /// need another event variant. Only the position and the press kind are read
+    /// today; see [`handle_mouse`](crate::State::handle_mouse).
+    Mouse(tuinix::MouseInput),
+
     /// The host terminal changed size.
     ///
     /// This is what a device rotation arrives as, and it is the event the whole

@@ -8,8 +8,9 @@
 //!
 //! Keys reach the core as [`Event::Key`](tumu::Event::Key): a key the prefix
 //! latch does not claim is forwarded to the focused sheet's session, and a
-//! latched key runs a command. Mouse, paste, and undecodable input are drained
-//! but not yet acted on.
+//! latched key runs a command. Mouse reports reach it as
+//! [`Event::Mouse`](tumu::Event::Mouse), which is how a click moves focus. Paste
+//! and undecodable input are drained but not yet acted on.
 //!
 //! The loop is edge-triggered, following `termnix`'s contract: every session's
 //! pending work is drained with [`Session::needs_pump()`](termnix::Session::needs_pump)
@@ -384,14 +385,21 @@ impl App {
 
     /// Turns one decoded input into core actions and carries them out.
     ///
-    /// Only keys reach the core for now: a mouse report, a paste, and an
-    /// undecodable sequence are all dropped where they arrive. Forwarding a
-    /// paste and a mouse event is a later change; until then the decoder must
-    /// still be drained, or a lone escape would never commit.
+    /// Keys and mouse reports reach the core; a paste and an undecodable
+    /// sequence are dropped where they arrive. Forwarding a paste is a later
+    /// change; until then the decoder must still be drained, or a lone escape
+    /// would never commit.
     fn handle_input(&mut self, input: tuinix::Input) -> std::io::Result<()> {
-        if let tuinix::Input::Key(key) = input {
-            let actions = self.state.update(tumu::Event::Key(key));
-            self.dispatch(actions)?;
+        match input {
+            tuinix::Input::Key(key) => {
+                let actions = self.state.update(tumu::Event::Key(key));
+                self.dispatch(actions)?;
+            }
+            tuinix::Input::Mouse(mouse) => {
+                let actions = self.state.update(tumu::Event::Mouse(mouse));
+                self.dispatch(actions)?;
+            }
+            _ => {}
         }
         Ok(())
     }

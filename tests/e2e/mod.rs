@@ -87,6 +87,34 @@ impl TumuHarness {
             .expect("failed to enqueue a key");
     }
 
+    /// Sends a mouse report to `tumu`, as a real terminal would.
+    ///
+    /// The report is written as the raw SGR bytes a terminal sends, rather than
+    /// through `termnix::Input::Mouse`: what is under test is `tumu`'s decode of
+    /// a real report, so the harness must produce the bytes, not go through the
+    /// same library `tumu` uses to encode them. SGR is what an xterm-compatible
+    /// terminal sends once reporting mode `1006` is on, which `tumu` asks for.
+    ///
+    /// `kind` is the SGR button/motion code -- `0` for a left press, the value
+    /// a terminal puts before the coordinates.
+    pub fn send_mouse_code(&mut self, code: u16, row: u16, col: u16) {
+        // SGR coordinates are one-based.
+        let bytes = format!("\x1b[<{code};{};{}M", col + 1, row + 1);
+        self.write_bytes(bytes.as_bytes());
+    }
+
+    /// Sends a left-button press at (`row`, `col`), zero-based.
+    pub fn click(&mut self, row: u16, col: u16) {
+        self.send_mouse_code(0, row, col);
+    }
+
+    /// Writes raw bytes to the command's terminal, as the host keyboard would.
+    pub fn write_bytes(&mut self, bytes: &[u8]) {
+        self.session
+            .enqueue_input(termnix::Input::Raw(bytes))
+            .expect("failed to enqueue raw input");
+    }
+
     /// Sends the prefix chord (`C-q`).
     pub fn send_prefix(&mut self) {
         self.send_key(termnix::KeyEvent {

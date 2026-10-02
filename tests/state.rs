@@ -424,3 +424,112 @@ fn a_sheet_hidden_by_full_screen_has_an_empty_region() {
     assert_eq!(state.region_of(1).map(|r| r.size.rows), Some(0));
     assert_eq!(state.region_of(2), None);
 }
+
+/// A mouse report of `kind` at a zero-based `position`.
+fn mouse(kind: tuinix::MouseInputKind, row: usize, col: usize) -> tuinix::MouseInput {
+    tuinix::MouseInput {
+        kind,
+        position: tuinix::Position { row, col },
+        ctrl: false,
+        alt: false,
+        shift: false,
+    }
+}
+
+/// A left press at a zero-based `position`.
+fn click(row: usize, col: usize) -> tuinix::MouseInput {
+    mouse(tuinix::MouseInputKind::LeftPress, row, col)
+}
+
+#[test]
+fn clicking_a_sheet_moves_focus_to_it() {
+    let mut state = state_with(24, 80, 2);
+    // An 80-column terminal splits into two 40-column sheets; the top one is
+    // focused to start with.
+    let top = state.stack.sheets()[0].0;
+    let bottom = state.stack.sheets()[1].0;
+    assert_eq!(state.focused, Some(top));
+
+    state.update(tumu::Event::Mouse(click(5, 60)));
+
+    assert_eq!(state.focused, Some(bottom));
+
+    // And back again, so the move is not one-way.
+    state.update(tumu::Event::Mouse(click(5, 10)));
+
+    assert_eq!(state.focused, Some(top));
+}
+
+#[test]
+fn clicking_the_focused_sheet_is_a_no_op() {
+    let mut state = state_with(24, 80, 2);
+    let top = state.stack.sheets()[0].0;
+    state.update(tumu::Event::Mouse(click(5, 10)));
+
+    let actions = state.update(tumu::Event::Mouse(click(5, 10)));
+
+    assert_eq!(state.focused, Some(top));
+    // Focus moves the keyboard, but it spawns nothing and writes to no child:
+    // the frame is the only thing a click changes.
+    assert!(actions.is_empty());
+}
+
+#[test]
+fn clicking_outside_every_sheet_changes_nothing() {
+    let mut state = state_with(24, 80, 2);
+    let focused = state.focused;
+
+    // One row past the bottom of the terminal.
+    let actions = state.update(tumu::Event::Mouse(click(24, 0)));
+
+    assert_eq!(state.focused, focused);
+    assert!(actions.is_empty());
+}
+
+#[test]
+fn a_sheet_hidden_by_full_screen_cannot_be_clicked() {
+    let mut state = state_with(24, 80, 2);
+    let top = state.stack.sheets()[0].0;
+    run_command(&mut state, 'z');
+
+    // This column belongs to the sheet below, which the full-screen view has
+    // taken off the screen: the clamp that empties its region must also make it
+    // unhittable, or a click on blank rows would steal focus out of the view.
+    state.update(tumu::Event::Mouse(click(5, 60)));
+
+    assert_eq!(state.focused, Some(top));
+}
+
+#[test]
+fn only_a_left_press_moves_focus() {
+    let mut state = state_with(24, 80, 2);
+    let focused = state.focused;
+
+    for kind in [
+        tuinix::MouseInputKind::LeftRelease,
+        tuinix::MouseInputKind::RightPress,
+        tuinix::MouseInputKind::MiddlePress,
+        tuinix::MouseInputKind::Drag,
+        tuinix::MouseInputKind::ScrollUp,
+        tuinix::MouseInputKind::ScrollDown,
+    ] {
+        state.update(tumu::Event::Mouse(mouse(kind, 5, 60)));
+        assert_eq!(state.focused, focused, "{kind:?} moved focus");
+    }
+}
+
+#[test]
+fn clicking_a_stacked_sheet_uses_the_derived_layout() {
+    // A tall terminal stacks vertically, so the split runs down the rows.
+    let mut state = state_with(40, 30, 2);
+    let top = state.stack.sheets()[0].0;
+    let bottom = state.stack.sheets()[1].0;
+
+    // The first two rows are a title and a line of the top sheet's content;
+    // the bottom half belongs to the sheet below.
+    state.update(tumu::Event::Mouse(click(30, 5)));
+    assert_eq!(state.focused, Some(bottom));
+
+    state.update(tumu::Event::Mouse(click(1, 5)));
+    assert_eq!(state.focused, Some(top));
+}

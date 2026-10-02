@@ -104,9 +104,50 @@ impl State {
     pub fn update(&mut self, event: Event) -> Vec<Action> {
         match event {
             Event::Key(key) => self.handle_key(key),
+            Event::Mouse(mouse) => self.handle_mouse(mouse),
             Event::Resize(size) => self.handle_resize(size),
             Event::SessionExited(id) => self.handle_session_exited(id),
         }
+    }
+
+    /// Moves focus to the sheet under the pointer.
+    ///
+    /// This is the first gesture mouse support answers, and the only one so far:
+    /// a left press picks the sheet it landed on. The test is done against
+    /// [`regions()`](State::regions) rather than the stack's own layout for one
+    /// reason -- that is the method where full screen enters the layout. A sheet
+    /// hidden behind a full-screen sheet has an empty region there, so a click
+    /// on the space it would have had lands on nothing instead of stealing focus
+    /// out from under the view. Reusing `Stack::hit_test` would test the
+    /// unfolded layout and do exactly that.
+    ///
+    /// Every other kind -- a release, a drag, a wheel turn -- is dropped. None
+    /// of them has a meaning yet, and a child never sees a mouse report while
+    /// the edge keeps reporting on for itself, so there is nothing to forward.
+    fn handle_mouse(&mut self, mouse: tuinix::MouseInput) -> Vec<Action> {
+        if mouse.kind != tuinix::MouseInputKind::LeftPress {
+            return Vec::new();
+        }
+        if let Some(index) = self.sheet_at(mouse.position)
+            && let Some((id, _)) = self.stack.sheets().get(index)
+        {
+            self.focused = Some(*id);
+        }
+        // Focus is a pure state change: nothing has to be spawned, resized, or
+        // written to a child. The edge repaints because the frame changed.
+        Vec::new()
+    }
+
+    /// Returns the index of the sheet under `position`, or `None` when the
+    /// position is outside every visible sheet.
+    ///
+    /// The first sheet in stack order wins, so an overlapping click -- only
+    /// reachable by a size the split cannot give every sheet a cell of -- picks
+    /// the one on top, the way a real stack would.
+    pub fn sheet_at(&self, position: tuinix::Position) -> Option<usize> {
+        self.regions()
+            .iter()
+            .position(|region| region.contains(position))
     }
 
     /// Turns a key press into actions, in the tmux prefix style.
