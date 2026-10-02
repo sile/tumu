@@ -42,37 +42,77 @@ pub fn terminal_region(size: tuinix::Size) -> tuinix::Region {
     }
 }
 
-/// Splits `region` into a top part and a bottom part along the requested
-/// number of rows.
+/// Splits `region` into a leading part and a trailing part along `axis`,
+/// giving the leading part `share` cells.
 ///
-/// `top_rows` rows go to the first region and the rest to the second. The two
-/// heights sum to the original, and the split is clamped so neither part is
-/// empty: a split that would leave a side with no rows keeps one row for it and
-/// gives the rest to the other. A region with a single row therefore yields two
-/// one-row regions that overlap the original's row.
+/// Verically, `share` rows go to the first region and the rest to the second;
+/// horizontally, `share` columns go to the first and the rest to the second. In
+/// either case the two sizes sum to the original along the axis, and the split
+/// is clamped so neither part is empty: a split that would leave a side with no
+/// cells keeps one cell for it and gives the rest to the other. A region one
+/// cell long therefore yields two one-cell regions that overlap the original.
 ///
 /// This is the one primitive the stack derives its layout from, so the whole
 /// arrangement is expressible as a left fold of it.
-pub fn split_region(region: tuinix::Region, top_rows: usize) -> (tuinix::Region, tuinix::Region) {
-    let total = region.size.rows;
-    let top = top_rows.clamp(1, total.saturating_sub(1).max(1));
-    let bottom = total.saturating_sub(top);
-    let top_region = tuinix::Region {
-        position: region.position,
-        size: tuinix::Size {
-            rows: top,
-            cols: region.size.cols,
-        },
-    };
-    let bottom_region = tuinix::Region {
-        position: tuinix::Position {
-            row: region.position.row + top,
-            col: region.position.col,
-        },
-        size: tuinix::Size {
-            rows: bottom,
-            cols: region.size.cols,
-        },
-    };
-    (top_region, bottom_region)
+pub fn split_region(
+    region: tuinix::Region,
+    share: usize,
+    axis: crate::Orientation,
+) -> (tuinix::Region, tuinix::Region) {
+    match axis {
+        crate::Orientation::Vertical => {
+            let total = region.size.rows;
+            let lead = share.clamp(1, total.saturating_sub(1).max(1));
+            let rest = total.saturating_sub(lead);
+            let lead_region = tuinix::Region {
+                position: region.position,
+                size: tuinix::Size {
+                    rows: lead,
+                    cols: region.size.cols,
+                },
+            };
+            let rest_region = tuinix::Region {
+                position: tuinix::Position {
+                    row: region.position.row + lead,
+                    col: region.position.col,
+                },
+                size: tuinix::Size {
+                    rows: rest,
+                    cols: region.size.cols,
+                },
+            };
+            (lead_region, rest_region)
+        }
+        crate::Orientation::Horizontal => {
+            let total = region.size.cols;
+            let lead = share.clamp(1, total.saturating_sub(1).max(1));
+            let rest = total.saturating_sub(lead);
+            let lead_region = tuinix::Region {
+                position: region.position,
+                size: tuinix::Size {
+                    rows: region.size.rows,
+                    cols: lead,
+                },
+            };
+            let rest_region = tuinix::Region {
+                position: tuinix::Position {
+                    row: region.position.row,
+                    col: region.position.col + lead,
+                },
+                size: tuinix::Size {
+                    rows: region.size.rows,
+                    cols: rest,
+                },
+            };
+            (lead_region, rest_region)
+        }
+    }
+}
+
+/// Returns the number of cells `region` has along `axis`.
+pub fn region_extent(region: tuinix::Region, axis: crate::Orientation) -> usize {
+    match axis {
+        crate::Orientation::Vertical => region.size.rows,
+        crate::Orientation::Horizontal => region.size.cols,
+    }
 }

@@ -108,25 +108,26 @@ impl Stack {
         }
     }
 
-    /// Returns the region of every window, top to bottom, for a terminal of
-    /// `size`.
+    /// Returns the region of every window, top to bottom (or left to right
+    /// when the terminal is wider than it is tall), for a terminal of `size`.
     ///
-    /// The derivation is a left fold over the windows. Each window takes its
-    /// share of the rows left, measured against everything still below it as a
-    /// single opponent; the last window takes whatever remains. The share is
-    /// the stack's [ratio](Stack::ratio) read as `window : rest`, so the
-    /// default `1 : 1` halves the space at each step: two windows are `1:1` and
-    /// three are `1:1` then `1:1` of the rest -- exactly the odds the README
-    /// gives.
+    /// The derivation is a left fold over the windows along the terminal's
+    /// [orientation](crate::orientation). Each window takes its share of the
+    /// cells left, measured against everything still below it as a single
+    /// opponent; the last window takes whatever remains. The share is the
+    /// stack's [ratio](Stack::ratio) read as `window : rest`, so the default
+    /// `1 : 1` halves the space at each step: two windows are `1:1` and three
+    /// are `1:1` then `1:1` of the rest -- exactly the odds the README gives.
     ///
-    /// The regions are returned in stack order and their heights sum to the
-    /// terminal's rows, the last taking whatever remains.
+    /// The regions are returned in stack order and their extents along the axis
+    /// sum to the terminal's, the last taking whatever remains.
     pub fn regions(&self, size: tuinix::Size) -> Vec<tuinix::Region> {
         let mut regions = Vec::with_capacity(self.windows.len());
         if self.windows.is_empty() {
             return regions;
         }
 
+        let axis = crate::orientation_with_default_factor(size);
         let mut remaining = geometry::terminal_region(size);
         for index in 0..self.windows.len() {
             let is_last = index + 1 == self.windows.len();
@@ -135,22 +136,22 @@ impl Stack {
                 break;
             }
 
-            // The share of the rows left that this window claims, from the
+            // The share of the cells left that this window claims, from the
             // stack's ratio read as `window : rest`. With the default odds
             // each window takes half of what is left, which is the `1:1` the
             // README gives.
             //
             // The share is kept within what the windows below can leave: each
-            // of them needs a row, so this window may claim at most
-            // `rows - below_count`. That keeps the heights summing to the
-            // terminal's rows even when the windows outnumber them, instead of
-            // rounding a share up into rows that do not exist.
-            let rows = remaining.size.rows;
+            // of them needs a cell, so this window may claim at most
+            // `extent - below_count`. That keeps the extents summing to the
+            // terminal's along the axis even when the windows outnumber them,
+            // instead of rounding a share up into cells that do not exist.
+            let extent = geometry::region_extent(remaining, axis);
             let below = self.windows.len() - index - 1;
-            let wanted = self.ratio.share_of(rows);
-            let share = wanted.clamp(1, rows.saturating_sub(below).max(1));
-            let (top, rest) = geometry::split_region(remaining, share);
-            regions.push(top);
+            let wanted = self.ratio.share_of(extent);
+            let share = wanted.clamp(1, extent.saturating_sub(below).max(1));
+            let (lead, rest) = geometry::split_region(remaining, share, axis);
+            regions.push(lead);
             remaining = rest;
         }
         regions

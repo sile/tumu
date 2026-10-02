@@ -27,7 +27,7 @@ fn a_single_window_fills_the_terminal() {
 }
 
 #[test]
-fn the_regions_sum_to_the_terminal_rows() {
+fn the_regions_fill_the_terminal_along_the_axis() {
     let seed = noprop::seed_from_env_or_time("TUMU_SEED").expect("seed");
     let mut runner = noprop::Runner::new(seed);
 
@@ -35,9 +35,15 @@ fn the_regions_sum_to_the_terminal_rows() {
         .run(256, |ctx| {
             let rows = noprop::sample_usize_in(ctx, 1..=40);
             let cols = noprop::sample_usize_in(ctx, 1..=120);
-            // Every window needs at least one row, so there can be no more
-            // windows than the terminal has rows.
-            let count = noprop::sample_usize_in(ctx, 1..=rows);
+            let size = size(rows, cols);
+            let axis = tumu::orientation_with_default_factor(size);
+            let extent = match axis {
+                tumu::Orientation::Vertical => rows,
+                tumu::Orientation::Horizontal => cols,
+            };
+            // Every window needs at least one cell along the axis, so there
+            // can be no more windows than the axis is long.
+            let count = noprop::sample_usize_in(ctx, 1..=extent);
             let num = noprop::sample_usize_in(ctx, 0..=8) as u32;
             let den = noprop::sample_usize_in(ctx, 0..=8) as u32;
             let mut stack = tumu::Stack::new();
@@ -48,69 +54,79 @@ fn the_regions_sum_to_the_terminal_rows() {
                 stack.push_top();
             }
 
-            let regions = stack.regions(size(rows, cols));
-            let total: usize = regions.iter().map(|r| r.size.rows).sum();
-            assert_eq!(total, rows, "rows for {count} windows at {rows}");
+            let regions = stack.regions(size);
+            let total: usize = regions
+                .iter()
+                .map(|r| match axis {
+                    tumu::Orientation::Vertical => r.size.rows,
+                    tumu::Orientation::Horizontal => r.size.cols,
+                })
+                .sum();
+            assert_eq!(total, extent, "extent for {count} windows at {rows}x{cols}");
+            // Each region spans the whole of the other side.
             for region in &regions {
-                assert_eq!(region.position.col, 0);
-                assert_eq!(region.size.cols, cols);
-                assert!(region.size.rows >= 1);
+                match axis {
+                    tumu::Orientation::Vertical => {
+                        assert_eq!(region.position.col, 0);
+                        assert_eq!(region.size.cols, cols);
+                        assert!(region.size.rows >= 1);
+                    }
+                    tumu::Orientation::Horizontal => {
+                        assert_eq!(region.position.row, 0);
+                        assert_eq!(region.size.rows, rows);
+                        assert!(region.size.cols >= 1);
+                    }
+                }
             }
             Ok(())
         })
         .expect("no property failed");
 }
 
+/// Fills a stack with `count` windows and returns the extent of each region
+/// along the terminal's axis, in stack order.
+fn extents(rows: usize, cols: usize, count: usize, ratio: tumu::Ratio) -> Vec<usize> {
+    let size = size(rows, cols);
+    let axis = tumu::orientation_with_default_factor(size);
+    let mut stack = tumu::Stack::new();
+    stack.set_ratio(ratio);
+    for _ in 0..count {
+        stack.push_top();
+    }
+    stack
+        .regions(size)
+        .iter()
+        .map(|r| match axis {
+            tumu::Orientation::Vertical => r.size.rows,
+            tumu::Orientation::Horizontal => r.size.cols,
+        })
+        .collect()
+}
+
 #[test]
 fn the_default_odds_halve_the_remaining_space() {
-    let mut stack = tumu::Stack::new();
-    stack.push_top();
-    stack.push_top();
-    stack.push_top();
-
-    // 1:1 then 1:1 of the rest, as the README spells the odds: 12, 6, 6 for 24.
-    let rows: Vec<usize> = stack
-        .regions(size(24, 80))
-        .iter()
-        .map(|r| r.size.rows)
-        .collect();
-
+    // A tall terminal, so the stack runs down the rows.
+    let rows = extents(24, 10, 3, tumu::Ratio::DEFAULT);
     assert_eq!(rows, vec![12, 6, 6]);
+
+    // The same odds read across a wide terminal divide the columns instead.
+    let cols = extents(10, 24, 3, tumu::Ratio::DEFAULT);
+    assert_eq!(cols, vec![12, 6, 6]);
 }
 
 #[test]
 fn a_ratio_of_two_to_one_grows_every_window_but_the_last() {
-    let mut stack = tumu::Stack::new();
-    stack.push_top();
-    stack.push_top();
-    stack.push_top();
-    stack.set_ratio(tumu::Ratio::new(2, 1).expect("2:1"));
+    let rows = extents(24, 10, 3, tumu::Ratio::new(2, 1).expect("2:1"));
 
     // 2:1 of 24 is 16, then 2:1 of the 8 left is 6 (rounded up), then 2.
-    let rows: Vec<usize> = stack
-        .regions(size(24, 80))
-        .iter()
-        .map(|r| r.size.rows)
-        .collect();
-
     assert_eq!(rows, vec![16, 6, 2]);
 }
 
 #[test]
 fn a_ratio_of_zero_hands_everything_to_the_windows_below() {
-    let mut stack = tumu::Stack::new();
-    stack.push_top();
-    stack.push_top();
-    stack.push_top();
-    stack.set_ratio(tumu::Ratio::new(0, 1).expect("0:1"));
+    let rows = extents(24, 10, 3, tumu::Ratio::new(0, 1).expect("0:1"));
 
     // The two top windows are squeezed to the one row they must keep.
-    let rows: Vec<usize> = stack
-        .regions(size(24, 80))
-        .iter()
-        .map(|r| r.size.rows)
-        .collect();
-
     assert_eq!(rows, vec![1, 1, 22]);
 }
 
@@ -145,21 +161,22 @@ fn hit_test_finds_the_topmost_window() {
     stack.push_top();
     stack.push_top();
 
+    // A wide terminal stacks horizontally, so the split runs down the columns.
     let screen = size(24, 80);
 
-    // The top window owns rows 0..12.
+    // The top window owns columns 0..40.
     assert_eq!(
         stack.hit_test(tuinix::Position { row: 0, col: 0 }, screen),
         Some(0)
     );
-    // The next owns rows 12..24.
+    // The next owns columns 40..80.
     assert_eq!(
         stack.hit_test(tuinix::Position { row: 23, col: 79 }, screen),
         Some(1)
     );
-    // A column outside the terminal matches nothing.
+    // A row outside the terminal matches nothing.
     assert_eq!(
-        stack.hit_test(tuinix::Position { row: 0, col: 80 }, screen),
+        stack.hit_test(tuinix::Position { row: 24, col: 0 }, screen),
         None
     );
 }

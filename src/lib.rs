@@ -21,6 +21,7 @@ mod action;
 mod event;
 mod geometry;
 mod id;
+mod orientation;
 mod ratio;
 mod render;
 mod stack;
@@ -30,9 +31,13 @@ mod window;
 pub use action::Action;
 pub use event::Event;
 pub use geometry::{
-    cell_size_to_terminal_size, split_region, terminal_region, terminal_size_to_cell_size,
+    cell_size_to_terminal_size, region_extent, split_region, terminal_region,
+    terminal_size_to_cell_size,
 };
 pub use id::{TermnixSessionId, WindowId};
+pub use orientation::{
+    DEFAULT_CELL_ASPECT, Orientation, orientation, orientation_with_default_factor,
+};
 pub use ratio::Ratio;
 pub use render::{frame, window_content_region};
 pub use stack::Stack;
