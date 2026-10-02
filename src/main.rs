@@ -49,9 +49,9 @@ fn main() -> noargs::Result<()> {
 /// Builds the recipe for the external editor `prefix l` hands the scrollback
 /// to.
 ///
-/// The editor is launched with `/dev/stdin` as its file, and the scrollback is
-/// written to its standard input, so the argument is fixed and only the program
-/// is configurable. `$TUMU_EDITOR` names it and falls back to `kk`, the editor
+/// The editor is launched as `<program> <tmpfile>`, where the path is a
+/// temporary file tumu writes the scrollback to, so only the program is
+/// configurable. `$TUMU_EDITOR` names it and falls back to `kk`, the editor
 /// this PoC is built around; the variable exists so a user (or a test) can
 /// point the feature at another editor without a rebuild.
 fn editor_command() -> app::EditorCommand {

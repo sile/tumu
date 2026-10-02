@@ -27,20 +27,13 @@
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::io::{Read, Write};
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// How long to wait for the rest of an escape sequence before a lone `ESC` byte
 /// is treated as the Escape key.
 const ESCAPE_TIMEOUT_MS: libc::c_int = 50;
-
-/// The argument that points the editor at the standard input it is fed.
-///
-/// The editor is launched as `<program> /dev/stdin`, so it opens `/dev/stdin`
-/// as the file to edit and reads exactly the text tumu writes to its standard
-/// input. Naming the file this way is what lets the PoC avoid a temporary file:
-/// the scrollback lives on a pipe and is never written to disk.
-const EDITOR_STDIN_PATH: &str = "/dev/stdin";
 
 /// Identifies one entry in the poll set, so a readiness result can be mapped
 /// back to what became ready.
@@ -79,14 +72,13 @@ impl ShellCommand {
     }
 }
 
-/// The program the scrollback is handed to, and the argument that makes it read
-/// from standard input.
+/// The program the scrollback is handed to.
 ///
-/// This mirrors [`ShellCommand`]: the recipe is a program and its arguments,
-/// not a live [`Command`], so a fresh one is built for each launch. The editor
-/// is treated as opaque -- tumu writes the scrollback to its standard input and
-/// does not care how it reads it -- so the only thing the recipe fixes is the
-/// `/dev/stdin` argument that ties the file it opens to the pipe tumu fills.
+/// This mirrors [`ShellCommand`]: the recipe is a program, not a live
+/// [`Command`], so a fresh one is built for each launch. The editor is treated
+/// as opaque -- tumu writes the scrollback to a temporary file and passes its
+/// path as the only argument, and does not care how the editor reads it -- so
+/// the recipe fixes just the program.
 #[derive(Debug, Clone)]
 pub struct EditorCommand {
     program: PathBuf,
@@ -98,14 +90,15 @@ impl EditorCommand {
         Self { program }
     }
 
-    /// Builds a fresh [`Command`] that opens standard input as its file.
+    /// Builds a fresh [`Command`] that opens `file` as its file.
     ///
-    /// The command is left with no standard streams set: the caller adds the
-    /// stdin pipe and lets the terminal streams be inherited, which is the
-    /// handover the editor needs.
-    pub fn command(&self) -> Command {
+    /// The command is left with no standard streams set: the caller lets the
+    /// terminal streams be inherited, which is the handover the editor needs.
+    /// The path is passed as a plain argument, so the editor opens it the same
+    /// way it would open any file the user named on the command line.
+    pub fn command(&self, file: &Path) -> Command {
         let mut command = Command::new(&self.program);
-        command.arg(EDITOR_STDIN_PATH);
+        command.arg(file);
         command
     }
 }
@@ -665,10 +658,12 @@ impl App {
     ///
     /// This is the copy-mode entry point: the scrollback of the sheet at
     /// `index` -- the history the emulator has pushed off the top, followed by
-    /// the rows still on screen -- is turned into text and written to the
-    /// editor's standard input. The editor is launched as
-    /// `kk /dev/stdin`, so it opens `/dev/stdin` as its file and reads exactly
-    /// that text; what it does with the terminal afterwards is its own business.
+    /// the rows still on screen -- is turned into text, written to a temporary
+    /// file, and handed to the editor as `kk <path>`. The file, not a pipe, is
+    /// what the editor opens: the PoC first fed the editor on standard input as
+    /// `kk /dev/stdin`, but `kk` treats its file argument as a path it opens and
+    /// refuses a non-terminal standard input, so a real file the editor names on
+    /// its command line is the shape that works.
     ///
     /// tumu owns the terminal, and the editor needs it, so the terminal is
     /// handed over for the child's lifetime: the [`tuinix::TerminalDriver`] is
@@ -681,6 +676,12 @@ impl App {
     /// it thinks are still right. Rebuilding the driver and clearing the frame
     /// is what makes the next paint a full one.
     ///
+    /// The temporary file lives only for the child's lifetime: it is removed as
+    /// soon as the child is reaped, on every exit path. A crash of tumu itself
+    /// could leave one behind, but that is left to the OS -- the file is created
+    /// where the platform already collects temporary files -- rather than
+    /// tracked and swept, which is more than the PoC needs.
+    ///
     /// A sheet with no session is left alone: there is nothing to read, so
     /// there is nothing to open. The index is one of the core's own and always
     /// names a sheet, so it is only the missing session that can stop this.
@@ -688,11 +689,18 @@ impl App {
         let Some(text) = self.scrollback_text(index) else {
             return Ok(());
         };
+        let file = match write_scrollback_file(&text) {
+            Ok(file) => file,
+            Err(err) => {
+                eprintln!("tumu: editor: {err}");
+                return Ok(());
+            }
+        };
 
         // Give the terminal back before the child starts, and take it again
         // after: the two brackets are the whole of the handover.
         self.driver = None;
-        let status = self.run_editor(&text);
+        let status = self.run_editor(&file);
         self.driver = Some(take_terminal()?);
         // A fresh driver starts with mouse reporting off, so it is re-requested
         // here exactly as at startup. It is a convenience, not a requirement,
@@ -702,6 +710,12 @@ impl App {
         // baseline for a differential repaint: dropping it forces a full one.
         self.previous = None;
         self.dirty = true;
+
+        // The child is gone, so the file has served its purpose. Removing it
+        // here -- after the wait, on the one path that launched a child -- is
+        // the whole of the cleanup; the scrollback is not written back, so
+        // nothing else reads it.
+        let _ = std::fs::remove_file(&file);
 
         // The editor's exit code is not tumu's to act on -- the scrollback is
         // not written back -- so a failure to launch or wait is reported and
@@ -713,36 +727,14 @@ impl App {
         Ok(())
     }
 
-    /// Runs the external editor on `text`, feeding it on standard input.
+    /// Runs the external editor on the file at `file`.
     ///
-    /// The write happens on its own thread so a scrollback larger than the pipe
-    /// buffer cannot deadlock the wait: the child drains the pipe as it reads
-    /// its file, and this thread blocks only until the last byte is handed over.
     /// The child inherits tumu's standard streams -- the terminal, since the
-    /// driver was dropped first -- so it can paint its own UI. Its standard
-    /// input is the pipe instead, which is the file it is asked to open.
-    fn run_editor(&self, text: &str) -> std::io::Result<std::process::ExitStatus> {
-        let mut child = self.editor.command().stdin(Stdio::piped()).spawn()?;
-
-        let mut stdin = child
-            .stdin
-            .take()
-            .expect("stdin was requested as a pipe, so it is present");
-        let bytes = text.as_bytes().to_vec();
-        let writer = std::thread::spawn(move || {
-            // A short read is fine only when the child stopped reading; there
-            // is nothing left to do about it from here, so the error is dropped
-            // and the child's exit status is what the caller sees.
-            let _ = stdin.write_all(&bytes);
-            // Dropping `stdin` closes the write end, which is the EOF the child
-            // waits for.
-        });
-
-        let status = child.wait();
-        // The child cannot exit before its input is closed, but joining here
-        // keeps the thread from outliving the call if it ever could.
-        let _ = writer.join();
-        status
+    /// driver was dropped first -- so it can paint its own UI, and the path is
+    /// passed as an ordinary argument, so it opens the file the way it would
+    /// open any file named on its command line.
+    fn run_editor(&self, file: &Path) -> std::io::Result<std::process::ExitStatus> {
+        self.editor.command(file).status()
     }
 
     /// Builds the text of the sheet's scrollback: history first, then the rows
@@ -772,6 +764,33 @@ impl App {
         }
         Some(rows.join("\n"))
     }
+}
+
+/// Writes `text` to a fresh temporary file and returns its path.
+///
+/// The file is created where the platform keeps temporary files -- `$TMPDIR`
+/// when set, `/tmp` otherwise -- under a name that carries the process id and a
+/// clock reading, so two launches do not collide. It is opened exclusively, so a
+/// name already taken is retried rather than clobbered, and it is returned by
+/// path only: the editor reopens it by name, so the handle tumu wrote through is
+/// closed here.
+fn write_scrollback_file(text: &str) -> std::io::Result<PathBuf> {
+    let dir = std::env::var_os("TMPDIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/tmp"));
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|since| since.subsec_nanos())
+        .unwrap_or(0);
+    let path = dir.join(format!("tumu-scrollback-{}-{nanos}", std::process::id()));
+    // Create first, then write through it: `create_new` fails if the name is
+    // taken, so a collision is surfaced rather than silently sharing a file.
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)?;
+    file.write_all(text.as_bytes())?;
+    Ok(path)
 }
 
 /// Renders one row of cells as text, trailing blanks trimmed.
