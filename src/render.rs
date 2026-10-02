@@ -8,8 +8,111 @@
 //! frame, so a test can assert on the frame as data. What the edge does with the
 //! frame -- comparing it to the last one and writing the terminal -- is the
 //! edge's business.
+//!
+//! The two layers a frame is built from are painted in two places. The chrome
+//! -- the title row of every visible sheet -- is drawn by [`frame()`] here, from
+//! the state alone. A sheet's *contents* are the grid of a live
+//! [`Session`](termnix::Session), which the core does not hold, so the edge
+//! paints them with [`draw_sheet_grid()`] after the chrome: the two occupy
+//! disjoint regions (a title is one row above the content), so the order does
+//! not matter.
 
 use crate::State;
+
+/// One sheet's terminal grid, ready to be painted into a frame.
+///
+/// This is the edge's view of the [`Session`](termnix::Session) a sheet shows:
+/// the visible rows, the cursor, and whether that cursor is shown. It borrows
+/// values the edge already owns, so the core stays free of `termnix` types of
+/// its own -- the struct is defined here only so both sides agree on the shape,
+/// and the rows it borrows are `termnix` cells.
+///
+/// Rows are top to bottom, each a left-to-right slice of cells as wide as the
+/// region it is painted into. A row shorter than the region leaves the rest of
+/// the row as it was; a longer row is clipped.
+pub struct SheetGrid<'a> {
+    /// The visible rows, top to bottom.
+    pub rows: &'a [&'a [termnix::Cell]],
+
+    /// The cursor position, relative to the grid's top-left corner.
+    pub cursor: termnix::Position,
+
+    /// Whether the cursor should be drawn. A hidden cursor is not shown even
+    /// when the region has room for it.
+    pub cursor_visible: bool,
+}
+
+/// Paints one sheet's grid into `frame`, with its top-left corner at `region`.
+///
+/// Pass the sheet's *content* region (see [`sheet_content_region()`]), not its
+/// full region: the title is painted one row above, and this must not cover it.
+/// Cells past the region's right edge or below its last row are dropped, so a
+/// grid larger than its region is clipped rather than spilling onto a
+/// neighbour.
+///
+/// This is the contents painter, so unlike the rest of the core it takes
+/// `termnix` cells: the grid belongs to a live session, which only the edge
+/// holds. The rest of the core still deals in `tuinix` geometry alone.
+pub fn draw_sheet_grid(frame: &mut tuinix::Frame, region: tuinix::Region, grid: &SheetGrid) {
+    for (row, cells) in grid.rows.iter().enumerate() {
+        if row >= region.size.rows {
+            break;
+        }
+        for (col, cell) in cells.iter().enumerate() {
+            if col >= region.size.cols {
+                break;
+            }
+            // A width-0 cell is the trailing half of a wide glyph; it stands
+            // for no character of its own, so the leading cell's width covers
+            // it and there is nothing to write here.
+            if cell.width == 0 {
+                continue;
+            }
+            let Some(ch) =
+                tuinix::Char::new(cell.ch, usize::from(cell.width), convert_style(cell.style))
+            else {
+                continue;
+            };
+            frame.put_char(
+                tuinix::Position {
+                    row: region.position.row + row,
+                    col: region.position.col + col,
+                },
+                ch,
+            );
+        }
+    }
+}
+
+/// Converts a [`termnix`] cell style into a [`tuinix`] style.
+///
+/// The two crates describe the same thing under different names: `termnix`
+/// always carries a color, with `Default` meaning "the terminal's default",
+/// while `tuinix` spells that as `None`. The flags `tuinix` has no field for
+/// (italic, blink, dim, strikethrough) are dropped rather than guessed at.
+fn convert_style(style: termnix::Style) -> tuinix::Style {
+    tuinix::Style {
+        bold: style.bold,
+        italic: style.italic,
+        underline: style.underline,
+        reverse: style.reverse,
+        fg_color: convert_color(style.foreground),
+        bg_color: convert_color(style.background),
+        ..tuinix::Style::new()
+    }
+}
+
+/// Converts a [`termnix`] color into a [`tuinix`] color.
+///
+/// [`termnix::Color::Default`] has no `tuinix` equivalent (it is `None` there),
+/// so it maps to `None` and lets the terminal's default show through.
+fn convert_color(color: termnix::Color) -> Option<tuinix::Color> {
+    match color {
+        termnix::Color::Default => None,
+        termnix::Color::Indexed(index) => Some(tuinix::Color::Indexed(index)),
+        termnix::Color::Rgb(r, g, b) => Some(tuinix::Color::Rgb(r, g, b)),
+    }
+}
 
 /// Returns the region of a sheet's content inside `region`.
 ///
@@ -29,14 +132,18 @@ pub fn sheet_content_region(region: tuinix::Region) -> tuinix::Region {
     }
 }
 
-/// Paints `state` into a fresh frame of the state's size.
+/// Paints `state`'s chrome into a fresh frame of the state's size.
 ///
-/// For the PoC, each sheet is drawn as its title row: the position in the
-/// stack, so the ordering and the derived sizes are visible without a live
-/// session behind them. The title marks the focused sheet -- the one the
-/// keyboard is aimed at -- so a rotation or a full-screen toggle is visible in
-/// the frame alone. Painting the sessions' grids into the content regions is the
-/// edge's job, because only it holds them.
+/// Each sheet is drawn as its title row: the position in the stack and the
+/// derived size, so the ordering and the layout are visible on their own -- and
+/// a test can assert on them without a live session behind them. The title
+/// marks the focused sheet -- the one the keyboard is aimed at -- with a `>`
+/// after the index, so a rotation or a full-screen toggle is visible in the
+/// frame alone.
+///
+/// The sheets' *contents* are not drawn here: they are the grids of the live
+/// sessions, which the core does not hold. The edge paints them afterwards with
+/// [`draw_sheet_grid()`], into the content regions this leaves for them.
 pub fn frame(state: &State) -> tuinix::Frame {
     let mut frame = tuinix::Frame::new(state.size);
     let focused = state.focused_index();

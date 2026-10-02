@@ -37,7 +37,28 @@ impl TumuHarness {
 
     /// Launches the `tumu` binary at a terminal of `rows`x`cols`.
     pub fn with_size(rows: u16, cols: u16) -> Self {
+        Self::spawn(rows, cols, |_| {})
+    }
+
+    /// Launches the `tumu` binary with `$SHELL` pinned to `shell`.
+    ///
+    /// Every sheet runs `$SHELL -l`, so pointing `$SHELL` at a script makes the
+    /// sheet's output something a test can assert on, instead of whatever the
+    /// user's login shell prints.
+    pub fn with_shell(rows: u16, cols: u16, shell: &str) -> Self {
+        let shell = shell.to_string();
+        Self::spawn(rows, cols, move |command| {
+            command.env("SHELL", shell);
+        })
+    }
+
+    /// Launches the binary, letting `setup` adjust the command first.
+    fn spawn<F>(rows: u16, cols: u16, setup: F) -> Self
+    where
+        F: FnOnce(&mut Command),
+    {
         let mut command = Command::new(tumu_binary());
+        setup(&mut command);
         let session = termnix::Session::new(&mut command, size(rows, cols))
             .expect("failed to start the tumu binary behind a PTY");
         Self {
