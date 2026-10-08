@@ -10,6 +10,7 @@ libc = "0.2"
 noargs = "0.4"
 termnix = "0.5"
 tuinix = "0.7"
+unicode-width = "0.2"
 
 [dev-dependencies]
 noprop = "0.2"

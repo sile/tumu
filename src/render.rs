@@ -133,12 +133,20 @@ pub fn sheet_content_region(region: tuinix::Region) -> tuinix::Region {
 
 /// Paints `state`'s chrome into a fresh frame of the state's size.
 ///
-/// Each sheet is drawn as its title row: the position in the stack and the
-/// derived size, so the ordering and the layout are visible on their own -- and
-/// a test can assert on them without a live session behind them. The title
-/// marks the focused sheet -- the one the keyboard is aimed at -- with a `>`
-/// after the index, so a rotation or a full-screen toggle is visible in the
-/// frame alone.
+/// Each sheet is drawn as its title row: the position in the stack, the title
+/// the child set (if any), and the derived size. The first two are what the
+/// sheet *is* -- which one it is, where the keyboard is aimed, what the child
+/// calls itself -- and lead; the size trails, because it is the part that can
+/// be spared when a region is too narrow to show everything. The title marks
+/// the focused sheet -- the one the keyboard is aimed at -- with a `>` after
+/// the index, so a rotation or a full-screen toggle is visible in the frame
+/// alone.
+///
+/// A title is the child's, so it may hold any character at all; its width is
+/// measured rather than assumed (see [`push_str`](Self::push_str) below). A
+/// character that would cross the region's right edge is dropped, and a wider
+/// one that does not fit in the columns left is dropped whole rather than
+/// half-painted.
 ///
 /// The sheets' *contents* are not drawn here: they are the grids of the live
 /// sessions, which the core does not hold. The edge paints them afterwards with
@@ -146,7 +154,9 @@ pub fn sheet_content_region(region: tuinix::Region) -> tuinix::Region {
 pub fn frame(state: &State) -> tuinix::Frame {
     let mut frame = tuinix::Frame::new(state.size);
     let focused = state.focused_index();
-    for (index, region) in state.regions().into_iter().enumerate() {
+    for (index, ((_, sheet), region)) in
+        state.stack.sheets().iter().zip(state.regions()).enumerate()
+    {
         // A sheet the full screen hides has no region, so there is no row to
         // title.
         if region.size.rows == 0 || region.size.cols == 0 {
@@ -155,20 +165,52 @@ pub fn frame(state: &State) -> tuinix::Frame {
         // Focus leads the title, so it survives a narrow region that clips the
         // rest: a `[1]` there may be all that is left after the marker.
         let marker = if Some(index) == focused { ">" } else { " " };
-        let title = format!("[{index}]{marker}{}x{}", region.size.rows, region.size.cols);
-        let right = region.position.col + region.size.cols;
         let mut position = region.position;
-        for ch in title.chars() {
-            if position.col >= right {
-                break;
-            }
-            // Titles are ASCII, so each character advances one column. A title
-            // that held a wide character would need its real width here.
-            let Some(cell) = tuinix::Char::new(ch, 1, tuinix::Style::RESET) else {
-                continue;
-            };
-            position = frame.put_char(position, cell);
+        let right = region.position.col + region.size.cols;
+        position = push_str(&mut frame, position, right, &format!("[{index}]{marker}"));
+        position = push_str(&mut frame, position, right, &sheet.title);
+        // A separator only when a title was written, so an untitled sheet does
+        // not read as `[0]> 24x40` with a stray space.
+        if !sheet.title.is_empty() {
+            position = push_str(&mut frame, position, right, " ");
         }
+        push_str(
+            &mut frame,
+            position,
+            right,
+            &format!("{}x{}", region.size.rows, region.size.cols),
+        );
     }
     frame
+}
+
+/// Writes `text` at `position`, stopping at column `right`, and returns the
+/// position just past what was written.
+///
+/// Each character's width is measured with `unicode-width`, the same UAX #11
+/// table `termnix` lays its grid out with, so a title and the content under it
+/// agree on how wide a character is. A character that would end past `right`
+/// is dropped, and so is one whose full width does not fit in the columns left
+/// -- a width-2 character with a single column to go is skipped rather than
+/// half-painted over the neighbour's title.
+fn push_str(
+    frame: &mut tuinix::Frame,
+    mut position: tuinix::Position,
+    right: usize,
+    text: &str,
+) -> tuinix::Position {
+    use unicode_width::UnicodeWidthChar;
+    for ch in text.chars() {
+        let Some(width) = ch.width() else {
+            continue;
+        };
+        if width == 0 || position.col + width > right {
+            break;
+        }
+        let Some(cell) = tuinix::Char::new(ch, width, tuinix::Style::RESET) else {
+            continue;
+        };
+        position = frame.put_char(position, cell);
+    }
+    position
 }

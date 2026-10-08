@@ -106,8 +106,23 @@ impl State {
             Event::Key(key) => self.handle_key(key),
             Event::Mouse(mouse) => self.handle_mouse(mouse),
             Event::Resize(size) => self.handle_resize(size),
+            Event::TitleChanged { index, title } => self.handle_title_changed(index, title),
             Event::SessionExited(id) => self.handle_session_exited(id),
         }
+    }
+
+    /// Records the title the child in the sheet at `index` set.
+    ///
+    /// Nothing on the layout moves: a title is a label, not a fact the regions
+    /// are derived from, so no session is resized and no action is returned. The
+    /// edge repaints because the frame it would build changed.
+    ///
+    /// An index with no sheet behind it is dropped rather than stored: the edge
+    /// reads the title off a session it is about to reap, and the sheet can be
+    /// gone by then.
+    fn handle_title_changed(&mut self, index: usize, title: String) -> Vec<Action> {
+        self.stack.set_title(index, title);
+        Vec::new()
     }
 
     /// Moves focus to the sheet under the pointer.

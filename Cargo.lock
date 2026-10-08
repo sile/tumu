@@ -61,6 +61,7 @@ dependencies = [
  "noprop",
  "termnix",
  "tuinix",
+ "unicode-width",
 ]
 
 [[package]]

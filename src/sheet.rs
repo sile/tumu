@@ -29,12 +29,23 @@ use crate::TermnixSessionId;
 pub struct Sheet {
     /// The session this sheet displays, or `None` until one is attached.
     pub session: Option<TermnixSessionId>,
+
+    /// The window title the child last set, or empty when it set none.
+    ///
+    /// The child owns this string: it arrives from OSC 0 / OSC 2 and is stored
+    /// as it came, empty included. The core does not interpret it -- it is a
+    /// label the child chose for itself, kept here so the renderer can show it
+    /// without reaching into a live session, which only the edge holds.
+    pub title: String,
 }
 
 impl Sheet {
-    /// Makes a sheet with no session attached.
+    /// Makes a sheet with no session attached and no title.
     pub const fn new() -> Self {
-        Self { session: None }
+        Self {
+            session: None,
+            title: String::new(),
+        }
     }
 }
 

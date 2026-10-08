@@ -264,16 +264,39 @@ impl App {
             // the frame learns whether it has to repaint. This is the event
             // side of the edge: `ScreenUpdated` and `TerminalReset` both mean
             // the visible grid may have moved, which is what dirties a sheet.
-            // The other events (a title, a retained line, a request, a
-            // hyperlink) do not change what this frame shows, so they are
-            // dropped for now.
+            // `TitleUpdated` is the one other event the frame reacts to: the
+            // title is shown in the sheet's title row, so it is read off the
+            // session and handed to the core. The remaining events (a
+            // retained line, a request, a hyperlink) do not change what this
+            // frame shows, so they are dropped for now.
+            //
+            // The title is copied out while the session is borrowed and the
+            // borrow is released before `state.update` runs: the core has no
+            // access to `self.sessions`, and the borrow of `session` would
+            // otherwise cover the call.
+            let mut title: Option<String> = None;
             while let Some(event) = session.dequeue_event() {
-                if matches!(
-                    event,
-                    termnix::Event::ScreenUpdated | termnix::Event::TerminalReset
-                ) {
-                    self.dirty = true;
+                match event {
+                    termnix::Event::ScreenUpdated | termnix::Event::TerminalReset => {
+                        self.dirty = true;
+                    }
+                    // Several title changes since the last drain merge into
+                    // one event, so the current title is read rather than a
+                    // payload carried on the event.
+                    termnix::Event::TitleUpdated => {
+                        title = Some(session.terminal_state().title().to_owned());
+                    }
+                    _ => {}
                 }
+            }
+            if let Some(title) = title
+                && let Some(index) = self.index_for_session(id)
+            {
+                let actions = self
+                    .state
+                    .update(tumu::Event::TitleChanged { index, title });
+                self.dispatch(actions)?;
+                self.dirty = true;
             }
         }
         self.reap_sessions()
@@ -315,6 +338,19 @@ impl App {
             .iter()
             .find(|(_, sheet)| sheet.session == Some(session))
             .map(|(id, _)| *id)
+    }
+
+    /// Returns the stack index of the sheet hosting `session`, if any.
+    ///
+    /// A title is delivered by index, like every other core event, and the
+    /// index is derived from the live sessions here: the core holds the sheet
+    /// that names the session, not the session itself.
+    fn index_for_session(&self, session: tumu::TermnixSessionId) -> Option<usize> {
+        self.state
+            .stack
+            .sheets()
+            .iter()
+            .position(|(_, sheet)| sheet.session == Some(session))
     }
 
     /// Blocks once for readiness, then handles what became ready.

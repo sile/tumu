@@ -8,7 +8,11 @@
 use crate::SheetId;
 
 /// Something that happened and that the core must react to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// An event is not `Copy`: a title is a `String` the child chose, so the word
+/// a sheet is labelled with costs an allocation to hand over. Everything else
+/// is small and `Copy`, but the derive has to follow the widest variant.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     /// A key was pressed on the host terminal.
     ///
@@ -37,6 +41,20 @@ pub enum Event {
     /// auto-derivation exists for: the stack re-lays-out and every sheet's
     /// region follows.
     Resize(tuinix::Size),
+
+    /// The child in the sheet at `index` set its window title.
+    ///
+    /// The title is the string the child sent with OSC 0 or OSC 2, carried
+    /// here so the core can keep it on the sheet: the renderer shows it in the
+    /// title row, and the core does not hold the live session it came from.
+    /// An empty title is a real value -- a terminal reset clears the title --
+    /// so it is reported the same way rather than skipped.
+    TitleChanged {
+        /// The sheet whose session set the title.
+        index: usize,
+        /// The title as the child sent it, or empty when it cleared it.
+        title: String,
+    },
 
     /// The session hosted by the given sheet exited.
     SessionExited(SheetId),

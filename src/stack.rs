@@ -108,6 +108,17 @@ impl Stack {
         }
     }
 
+    /// Sets the title of the sheet at `index`.
+    ///
+    /// Does nothing when there is no such sheet. The title is stored as it
+    /// arrives -- empty included -- because it is the child's own label, and
+    /// clearing it (a terminal reset) is as meaningful as setting it.
+    pub fn set_title(&mut self, index: usize, title: impl Into<String>) {
+        if let Some((_, sheet)) = self.sheets.get_mut(index) {
+            sheet.title = title.into();
+        }
+    }
+
     /// Returns the region of every sheet, top to bottom (or left to right
     /// when the terminal is wider than it is tall), for a terminal of `size`.
     ///
