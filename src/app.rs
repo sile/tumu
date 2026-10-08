@@ -248,11 +248,6 @@ impl App {
             let Some(session) = self.sessions.get_mut(&id) else {
                 continue;
             };
-            // The terminal's revision bumps at most once per `feed`, so it is a
-            // cheap way to tell whether a pump changed what a sheet shows.
-            // Sampling it around the drain dirties the frame exactly when the
-            // visible grid moved, and not on an idle pump.
-            let before = session.terminal_state().revision();
             loop {
                 match session.pump_io(termnix::PumpBudget::default()) {
                     Ok(()) => {}
@@ -265,8 +260,20 @@ impl App {
                     break;
                 }
             }
-            if session.terminal_state().revision() != before {
-                self.dirty = true;
+            // The pump queues what the child did; draining the queue is how
+            // the frame learns whether it has to repaint. This is the event
+            // side of the edge: `ScreenUpdated` and `TerminalReset` both mean
+            // the visible grid may have moved, which is what dirties a sheet.
+            // The other events (a title, a retained line, a request, a
+            // hyperlink) do not change what this frame shows, so they are
+            // dropped for now.
+            while let Some(event) = session.dequeue_event() {
+                if matches!(
+                    event,
+                    termnix::Event::ScreenUpdated | termnix::Event::TerminalReset
+                ) {
+                    self.dirty = true;
+                }
             }
         }
         self.reap_sessions()

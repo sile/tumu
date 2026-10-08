@@ -8,9 +8,8 @@ description = "A terminal multiplexer with stacked sheets"
 [dependencies]
 libc = "0.2"
 noargs = "0.4"
-termnix = "0.3"
+termnix = "0.5"
 tuinix = "0.7"
 
 [dev-dependencies]
 noprop = "0.2"
-tuinix = "0.7"

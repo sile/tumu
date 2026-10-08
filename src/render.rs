@@ -87,8 +87,8 @@ pub fn draw_sheet_grid(frame: &mut tuinix::Frame, region: tuinix::Region, grid: 
 /// Converts a [`termnix`] cell style into a [`tuinix`] style.
 ///
 /// The two crates describe the same thing under different names: `termnix`
-/// always carries a color, with `Default` meaning "the terminal's default",
-/// while `tuinix` spells that as `None`. The flags `tuinix` has no field for
+/// spells "the terminal's default" as `None`, which is what `tuinix` uses too,
+/// so the two colors map across unchanged. The flags `tuinix` has no field for
 /// (italic, blink, dim, strikethrough) are dropped rather than guessed at.
 fn convert_style(style: termnix::Style) -> tuinix::Style {
     tuinix::Style {
@@ -104,13 +104,12 @@ fn convert_style(style: termnix::Style) -> tuinix::Style {
 
 /// Converts a [`termnix`] color into a [`tuinix`] color.
 ///
-/// [`termnix::Color::Default`] has no `tuinix` equivalent (it is `None` there),
-/// so it maps to `None` and lets the terminal's default show through.
-fn convert_color(color: termnix::Color) -> Option<tuinix::Color> {
-    match color {
-        termnix::Color::Default => None,
+/// `None` is "the terminal's default" in both crates, so it passes straight
+/// through; an indexed or RGB color is the same shape on both sides.
+fn convert_color(color: Option<termnix::Color>) -> Option<tuinix::Color> {
+    match color? {
         termnix::Color::Indexed(index) => Some(tuinix::Color::Indexed(index)),
-        termnix::Color::Rgb(r, g, b) => Some(tuinix::Color::Rgb(r, g, b)),
+        termnix::Color::Rgb(rgb) => Some(tuinix::Color::Rgb(rgb.r, rgb.g, rgb.b)),
     }
 }
 
