@@ -192,14 +192,17 @@ fn the_edit_scrollback_command_names_the_focused_sheet() {
 #[test]
 fn editing_the_scrollback_leaves_the_stack_alone() {
     let mut state = state_with(24, 80, 2);
-    let before = state.stack.sheets().to_vec();
+    let before: Vec<tumu::SheetId> = state.stack.sheets().iter().map(|(id, _)| *id).collect();
     let focused = state.focused;
 
     run_command(&mut state, 'l');
 
     // Opening the scrollback is not a view of tumu's own: nothing on the stack
-    // moved, focus stayed put, and the loop is not asked to stop.
-    assert_eq!(state.stack.sheets(), before.as_slice());
+    // moved, focus stayed put, and the loop is not asked to stop. The ids are
+    // compared, not the sheets: a sheet is told apart by its id, and the stack
+    // is what the command must not have touched.
+    let after: Vec<tumu::SheetId> = state.stack.sheets().iter().map(|(id, _)| *id).collect();
+    assert_eq!(after, before);
     assert_eq!(state.focused, focused);
     assert!(!state.full_screen);
     assert!(!state.exit);

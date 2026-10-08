@@ -16,7 +16,16 @@
 use crate::TermnixSessionId;
 
 /// One sheet: a window of the stack showing a terminal session.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+///
+/// A sheet is deliberately neither `Copy` nor comparable. It is a place a
+/// session is shown, not a value to be duplicated: the stack owns each sheet
+/// exactly once, and two sheets are told apart by their [`SheetId`], not by
+/// their contents. Skipping those derives now saves every later field -- a
+/// title, a scroll position -- from having to be clonable-for-free and
+/// meaningfully comparable for the whole struct to keep compiling.
+///
+/// [`SheetId`]: crate::SheetId
+#[derive(Debug, Clone)]
 pub struct Sheet {
     /// The session this sheet displays, or `None` until one is attached.
     pub session: Option<TermnixSessionId>,
