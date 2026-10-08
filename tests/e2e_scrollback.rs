@@ -33,13 +33,13 @@ fn the_prefix_l_hand_off_sends_the_sheet_output_to_the_editor() {
     // The sheet prints a marker and then waits, so its output stays on screen
     // while the scrollback is collected.
     let shell = script("scrollback-shell", "echo SHEET-HELLO; exec sleep 30");
-    // The editor copies the file tumu names as its first argument to the
-    // output file. It is handed the temporary file path, which is what
-    // `kk <path>` would open.
+    // The editor copies the file tumu names to the output file. It is handed
+    // the file path as its last argument, after the `--tail` flag, which is
+    // what `kk --tail <path>` would open.
     let out = out_path("handoff");
     let editor = script(
         "scrollback-editor",
-        &format!("cat \"$1\" > {}", out.display()),
+        &format!("cat \"$2\" > {}", out.display()),
     );
 
     let mut tumu = e2e::TumuHarness::with_shell_and_editor(

@@ -94,10 +94,13 @@ impl EditorCommand {
     ///
     /// The command is left with no standard streams set: the caller lets the
     /// terminal streams be inherited, which is the handover the editor needs.
-    /// The path is passed as a plain argument, so the editor opens it the same
-    /// way it would open any file the user named on the command line.
+    /// The file is opened at its end (`--tail`), so the latest scrollback is
+    /// what the editor shows first, and the path is passed last as a plain
+    /// argument, so the editor opens it the way it would open any file the
+    /// user named on the command line.
     pub fn command(&self, file: &Path) -> Command {
         let mut command = Command::new(&self.program);
+        command.arg("--tail");
         command.arg(file);
         command
     }

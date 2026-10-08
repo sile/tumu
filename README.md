@@ -89,11 +89,12 @@ Copy mode (PoC)
 `prefix l` is the first step of a tmux-like copy mode, kept simple for now: the
 focused sheet's scrollback -- the history the emulator has pushed off the top,
 followed by the rows still on screen -- is joined into text, written to a
-temporary file, and handed to an external editor as `kk <path>` (see `../kk`).
-The editor opens the file the way it would open any file named on its command
-line; what it does with the terminal afterwards is its own business. Selecting
-and copying live in the editor for now; tumu only collects the text and opens
-it.
+temporary file, and handed to an external editor as `kk --tail <path>` (see
+`../kk`). The `--tail` flag opens the file at its end, so the latest scrollback
+is what the editor shows first; the editor opens the file the way it would open
+any file named on its command line, and what it does with the terminal
+afterwards is its own business. Selecting and copying live in the editor for
+now; tumu only collects the text and opens it.
 
 The temporary file lives only while the editor runs: it is created under
 `$TMPDIR` (or `/tmp`) and removed as soon as the editor exits. A crash of tumu
@@ -105,7 +106,8 @@ fresh driver when the editor exits. The screen is repainted from scratch
 afterwards, because the editor painted over it.
 
 The editor program is fixed to `kk` by default and can be changed with
-`$TUMU_EDITOR`; the path of the temporary file is passed as the only argument.
+`$TUMU_EDITOR`; it is always launched as `<program> --tail <path>`, so the
+program must accept `--tail` and a file path.
 
 Mouse
 -----
