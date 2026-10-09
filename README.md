@@ -13,30 +13,26 @@ tumu
   - No sessions, panes, pop-up windows
   - Detect device orientation changes (via terminal size change event)
   - No server (a standalone process)
-  - tmux like copy-mode
+  - Mouse: click a sheet to focus it
+  - tmux like copy-mode (PoC)
 
 Stacked sheets
 --------------
 
-Image (vertical stacked).
+Vertically stacked:
 
 ```
-|           |
-|           |
-| sheet 1   |
-|           |
-|           |
-| $         |
--------------
-| sheet 2 (show last line)
-|- pwd / proc name
-| sheet 3   |
--------------
-| ...       |
--------------
+|            |            |
+|            |            |
+| sheet 1    | sheet 2    |
+|            |            |
+| $          | $          |
+|            |            |
+|------------|------------|
 ```
 
 Horizontally stacked:
+
 ```
 ----------------|---|---|
 sheet 1         |   |   |
@@ -54,6 +50,30 @@ $               |$  |   |
 - a sheet can be swaped to the top, or, move to the stop
 - support full screen mode (like tmux does)
 - c-o is the prefix for tumu commands
+
+Sheet border
+------------
+
+The sheets of a stack are divided by a border line: one line per sheet, along
+the stack's axis, reading from the corner outwards.
+
+Vertically stacked, the border is the sheet's **top edge** -- a corner, the
+command label (focused sheet only), the title the child last set, then rule to
+the edge:
+
+```
+focused:  └ [C-q ...] TITLE ───────
+others:   └ TITLE ─────────────────
+```
+
+Horizontally stacked, it is the sheet's **left edge**, the same text written
+*down* its column, one character per row, so it reads top to bottom the way the
+other one reads left to right.
+
+Which edge it is follows the terminal's shape, not a setting, so a rotation
+flips the border along with the layout. The label `[C-q ...]` is drawn only on
+the focused sheet, so which sheet the keyboard is aimed at is visible in the
+frame alone.
 
 Keys
 ----
@@ -82,15 +102,8 @@ stack comes up under the keyboard rather than the keyboard moving away.
 terminal while the others keep their places, and clearing the flag brings the
 same layout straight back.
 
-Each sheet is bounded by a line along the stack's axis -- the top edge when the
-stack is vertical, the left edge when it is horizontal -- drawn as `└` at the
-corner, the sheet's title, and `─` to the edge. Only the focused sheet's line
-carries the command label `[C-q ...]`, so which sheet the keyboard is aimed at
-is visible in the frame alone. When the stack is horizontal the border is
-written *down* its column, one character per row, so it reads the same way.
-
 Copy mode (PoC)
--------------
+---------------
 
 `prefix l` is the first step of a tmux-like copy mode, kept simple for now: the
 focused sheet's scrollback -- the history the emulator has pushed off the top,
@@ -115,37 +128,8 @@ The editor program is fixed to `kk` by default and can be changed with
 `$TUMU_EDITOR`; it is always launched as `<program> --tail <path>`, so the
 program must accept `--tail` and a file path.
 
-Mouse
------
-
-- click a sheet -- focus it
-
-A click moves the focus to the sheet it landed on; it changes nothing else. The
-keyboard follows, so `prefix x` and `prefix o` act on the sheet just clicked.
-A sheet hidden behind a full-screen sheet cannot be clicked: what is not on
-screen is not there to point at.
-
-Only the left button does something so far. Nothing is forwarded to the
-programs running in the sheets -- a click belongs to tumu -- so a fuller mouse
-(giving a sheet its own report when it wants one) is still open.
-
-
-Sheet border and menu
----------------------
-
-In vertical layout, the sheet has the border line as follows (this replaced
-the old title row):
-
-```
-└ [C-q ...] TITLE ───────
-```
-
-Every sheet shows the border; only the focused sheet shows the `[C-q ...]`
-label. In horizontal layout the same line is written vertically in the sheet's
-left column.
-
-The menu
---------
+Menu
+----
 
 When the prefix (default to C-q) is pressed, or the `[C-q ...]` label is
 clicked, an overlay menu window is shown on the center of the terminal:
@@ -165,3 +149,24 @@ are resolved from, so a chord cannot be bound without appearing in the menu, or
 listed without being bound. A command is run by pressing its key or by clicking
 anywhere on its row. If an unbound key is pressed, or a region other than a
 command row is clicked, the menu is closed and nothing else happens.
+
+The menu is a view, like full screen: it changes no sheet's region and leaves
+the stack alone. When the terminal is too small for the box, no menu is shown
+at all, so a click never lands on one that was not drawn.
+
+Mouse
+-----
+
+- click a sheet -- focus it
+- click the focused sheet's border line -- open the menu
+- click a menu row -- run that command
+
+A click moves the focus to the sheet it landed on; it changes nothing else. The
+keyboard follows, so `prefix x` and `prefix o` act on the sheet just clicked.
+A click on a border line opens the menu without moving the focus, and a sheet
+hidden behind a full-screen sheet cannot be clicked at all: what is not on
+screen is not there to point at.
+
+Only the left button does something so far. Nothing is forwarded to the
+programs running in the sheets -- a click belongs to tumu -- so a fuller mouse
+(giving a sheet its own report when it wants one) is still open.
