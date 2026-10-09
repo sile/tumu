@@ -167,6 +167,35 @@ impl TumuHarness {
         self.screen_rows().iter().any(|r| r.contains(needle))
     }
 
+    /// Reads one column of the screen back as a string, top to bottom.
+    ///
+    /// A horizontal stack writes each sheet's border *down* its left column, so
+    /// the border text is not on any one row: this is how a test reads it.
+    pub fn screen_column(&self, col: u16) -> String {
+        let state = self.session.terminal_state();
+        let mut column = String::new();
+        for row in 0..self.rows {
+            let cell = state
+                .cell(termnix::Position { row, col })
+                .expect("cell within the emulator grid");
+            if cell.width == 0 {
+                continue;
+            }
+            column.push(cell.ch);
+        }
+        column.trim_end().to_string()
+    }
+
+    /// Whether any column of the screen contains `needle`.
+    pub fn screen_column_contains(&self, needle: &str) -> bool {
+        (0..self.cols).any(|col| self.screen_column(col).contains(needle))
+    }
+
+    /// Waits until a column of the screen shows `needle`.
+    pub fn wait_for_column_text(&mut self, needle: &str) {
+        self.wait_until(needle, |h| h.screen_column_contains(needle));
+    }
+
     /// The whole screen with rows joined by newlines.
     pub fn screen_text(&self) -> String {
         self.screen_rows().join("\n")

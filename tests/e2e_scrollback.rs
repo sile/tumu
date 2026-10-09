@@ -43,8 +43,8 @@ fn the_prefix_l_hand_off_sends_the_sheet_output_to_the_editor() {
     );
 
     let mut tumu = e2e::TumuHarness::with_shell_and_editor(
+        40,
         24,
-        80,
         shell.to_str().expect("utf-8 path"),
         editor.to_str().expect("utf-8 path"),
     );
@@ -61,6 +61,6 @@ fn the_prefix_l_hand_off_sends_the_sheet_output_to_the_editor() {
             .unwrap_or(false)
     });
 
-    // tumu is back in control afterwards: the sheet's title is on screen again.
-    tumu.wait_for_text("[0]>24x80");
+    // tumu is back in control afterwards: the sheet's border is on screen again.
+    tumu.wait_for_text("└ [C-q ...]");
 }

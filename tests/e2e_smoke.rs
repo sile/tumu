@@ -7,10 +7,14 @@
 mod e2e;
 
 #[test]
-fn tumu_starts_and_paints_a_sheet_title() {
-    let mut tumu = e2e::TumuHarness::open();
+fn tumu_starts_and_paints_a_sheet_border() {
+    // A tall terminal stacks vertically, so the border is a row the test can
+    // read back as text; the default 24x80 stacks horizontally and writes the
+    // border down a column instead.
+    let mut tumu = e2e::TumuHarness::with_size(40, 24);
 
-    // The single startup sheet is sheet 0, the derived size is the whole
-    // terminal, and it is focused -- hence the marker after the index.
-    tumu.wait_for_text("[0]>24x80");
+    // The single startup sheet is focused, so its border carries the command
+    // label, and the corner and rule run the rest of the row.
+    tumu.wait_for_text("└ [C-q ...]");
+    assert!(tumu.screen_contains('─'.to_string().as_str()));
 }

@@ -139,18 +139,38 @@ fn convert_color(color: Option<termnix::Color>) -> Option<tuinix::Color> {
 
 /// Returns the size of a sheet's content when the sheet is `size`.
 ///
-/// The content sits one row below the top of the sheet, leaving that row for a
-/// title. A sheet one row tall therefore has no content rows, which is how a
-/// collapsed sheet is drawn: its single row is the title alone.
+/// The border takes one line off the sheet along the stack's axis: the top row
+/// when the stack runs vertically, the left column when it runs horizontally.
+/// The rest is the content. A sheet one cell long on that axis therefore has no
+/// content cells, which is how a collapsed sheet is drawn: its single line is
+/// the border alone.
 ///
 /// The result is a size, not a region, because inside a sheet the content's
-/// top-left corner is always `(0, 1)`: the sheet's own frame starts at `(0, 0)`
-/// and the screen position of the sheet is applied when the sheet is composed
-/// into the screen, not when it is drawn.
-pub fn sheet_content_size(size: tuinix::Size) -> tuinix::Size {
-    tuinix::Size {
-        rows: size.rows.saturating_sub(1),
-        cols: size.cols,
+/// top-left corner is always one cell along the axis: `(1, 0)` vertically,
+/// `(0, 1)` horizontally. The sheet's own frame starts at `(0, 0)` and the
+/// screen position of the sheet is applied when the sheet is composed into the
+/// screen, not when it is drawn.
+pub fn sheet_content_size(size: tuinix::Size, orientation: crate::Orientation) -> tuinix::Size {
+    match orientation {
+        crate::Orientation::Vertical => tuinix::Size {
+            rows: size.rows.saturating_sub(1),
+            cols: size.cols,
+        },
+        crate::Orientation::Horizontal => tuinix::Size {
+            rows: size.rows,
+            cols: size.cols.saturating_sub(1),
+        },
+    }
+}
+
+/// Returns where a sheet's content starts inside the sheet's own frame.
+///
+/// One cell along the stack's axis, past the border: down one row when the
+/// stack runs vertically, right one column when it runs horizontally.
+pub fn sheet_content_origin(orientation: crate::Orientation) -> tuinix::Position {
+    match orientation {
+        crate::Orientation::Vertical => tuinix::Position { row: 1, col: 0 },
+        crate::Orientation::Horizontal => tuinix::Position { row: 0, col: 1 },
     }
 }
 
@@ -170,6 +190,7 @@ pub fn sheet_content_size(size: tuinix::Size) -> tuinix::Size {
 pub fn frame(state: &State, contents: &impl SheetContents) -> tuinix::Frame {
     let mut screen = tuinix::Frame::new(state.size);
     let focused = state.focused_index();
+    let orientation = state.orientation();
     for (index, ((_, sheet), region)) in
         state.stack.sheets().iter().zip(state.regions()).enumerate()
     {
@@ -178,58 +199,119 @@ pub fn frame(state: &State, contents: &impl SheetContents) -> tuinix::Frame {
         if region.size.rows == 0 || region.size.cols == 0 {
             continue;
         }
-        let mut sheet_frame = sheet_frame(index, sheet, region.size, focused == Some(index));
+        let mut sheet_frame = sheet_frame(sheet, region.size, focused == Some(index), orientation);
         if let Some(grid) = contents.grid(index) {
-            let mut content = tuinix::Frame::new(sheet_content_size(region.size));
+            let mut content = tuinix::Frame::new(sheet_content_size(region.size, orientation));
             draw_sheet_grid(&mut content, &grid);
-            // The content frame is one row shorter than the sheet and sits one
-            // row down, under the title.
-            sheet_frame.put_frame(tuinix::Position { row: 1, col: 0 }, &content);
+            // The content frame sits one cell along the axis, past the border.
+            sheet_frame.put_frame(sheet_content_origin(orientation), &content);
         }
         screen.put_frame(region.position, &sheet_frame);
     }
     screen
 }
 
-/// Draws one sheet's title into a fresh frame of size `size`.
+/// The corner a sheet's border starts at.
 ///
-/// The title is: the position in the stack, the title the child set (if any),
-/// and the derived size. The first two are what the sheet *is* -- which one it
-/// is, what the child calls itself -- and lead; the size trails, because it is
-/// the part that can be spared when the sheet is too narrow to show everything.
-/// A focused sheet -- the one the keyboard is aimed at -- is marked with a `>`
-/// after the index, so a rotation or a full-screen toggle is visible in the
-/// frame alone.
+/// The border runs along the sheet's top edge when the stack is vertical and
+/// its left edge when horizontal, and the line comes away from the corner
+/// downwards or rightwards. `└` is the corner that joins a border below it to
+/// one going right, which is exactly this shape.
+const BORDER_CORNER: char = '└';
+
+/// The rule the rest of a border is drawn with.
+const BORDER_RULE: char = '─';
+
+/// The label the focused sheet shows where a command can be started.
 ///
-/// The frame is the sheet's own, so its right edge is the sheet's right edge:
-/// a title that would cross it is clipped here and cannot reach a neighbour.
-/// A title is the child's, so it may hold any character at all; its width is
-/// measured rather than assumed (see [`push_str()`] below).
+/// It is the prefix key written the way it is pressed, followed by a mark that
+/// more can follow -- the ellipsis the README draws -- so a sheet says that the
+/// keyboard is aimed at it and that a command is one key away. Only the focused
+/// sheet shows it; every other sheet's border starts straight into its label,
+/// which is what makes the sheet under the keyboard obvious at a glance.
+const BORDER_LABEL: &str = "[C-q ...]";
+
+/// Draws one sheet's border into a fresh frame of size `size`.
+///
+/// The border is a single line along the stack's axis -- the top row when the
+/// stack is vertical, the left column when it is horizontal -- that reads, from
+/// the corner outwards: a corner (`└`), the command label (only on the focused
+/// sheet), the title the child set (if any); the rest of the line up to the
+/// sheet's edge is rule (`─`). The corner and the rule are what make the sheet
+/// read as a sheet -- a line the stack is divided by -- and the label and the
+/// title are what distinguish one from another.
+///
+/// When the stack is horizontal the same text is written *down the column*, one
+/// character per row, so the border reads top to bottom in a left edge the same
+/// way it reads left to right in a top edge.
+///
+/// The frame is the sheet's own, so its far edge is the sheet's far edge: a
+/// border that would cross it is clipped here and cannot reach a neighbour. A
+/// title is the child's, so it may hold any character at all; in a vertical
+/// stack its width is measured rather than assumed (see [`push_str()`] below),
+/// while a horizontal border is one cell per character by construction.
 pub fn sheet_frame(
-    index: usize,
     sheet: &crate::Sheet,
     size: tuinix::Size,
     focused: bool,
+    orientation: crate::Orientation,
 ) -> tuinix::Frame {
-    let mut frame = tuinix::Frame::new(size);
-    // Focus leads the title, so it survives a narrow sheet that clips the rest:
-    // a `[1]` there may be all that is left after the marker.
-    let marker = if focused { ">" } else { " " };
-    let right = size.cols;
-    let mut position = tuinix::Position::ORIGIN;
-    position = push_str(&mut frame, position, right, &format!("[{index}]{marker}"));
-    position = push_str(&mut frame, position, right, &sheet.title);
-    // A separator only when a title was written, so an untitled sheet does not
-    // read as `[0]> 24x40` with a stray space.
-    if !sheet.title.is_empty() {
-        position = push_str(&mut frame, position, right, " ");
+    // The line, corner to edge, as the text it reads. A separator follows the
+    // corner and the label only when something comes after them, so an untitled
+    // unfocused sheet is a bare `└` and then rule.
+    let mut line = String::new();
+    line.push(BORDER_CORNER);
+    if focused {
+        line.push(' ');
+        line.push_str(BORDER_LABEL);
+        line.push(' ');
     }
-    push_str(
-        &mut frame,
-        position,
-        right,
-        &format!("{}x{}", size.rows, size.cols),
-    );
+    if !sheet.title.is_empty() {
+        line.push_str(&sheet.title);
+        line.push(' ');
+    }
+
+    let mut frame = tuinix::Frame::new(size);
+    match orientation {
+        crate::Orientation::Vertical => {
+            // The border is the top row; the text runs left to right and stops
+            // at the sheet's right edge.
+            let right = size.cols;
+            let after_text = push_str(&mut frame, tuinix::Position::ORIGIN, right, &line);
+            // The rule fills the rest of the row, corner to edge.
+            let mut position = after_text;
+            while position.col < right {
+                let Some(cell) = tuinix::Char::new(BORDER_RULE, 1, tuinix::Style::RESET) else {
+                    break;
+                };
+                position = frame.put_char(position, cell);
+            }
+        }
+        crate::Orientation::Horizontal => {
+            // The border is the left column; the text runs top to bottom, one
+            // character per row, so a line longer than the sheet is clipped at
+            // the bottom edge just as a vertical one is at the right edge.
+            let bottom = size.rows;
+            let mut row = 0;
+            for ch in line.chars() {
+                if row >= bottom {
+                    break;
+                }
+                let Some(cell) = tuinix::Char::new(ch, 1, tuinix::Style::RESET) else {
+                    continue;
+                };
+                frame.put_char(tuinix::Position { row, col: 0 }, cell);
+                row += 1;
+            }
+            while row < bottom {
+                let Some(cell) = tuinix::Char::new(BORDER_RULE, 1, tuinix::Style::RESET) else {
+                    break;
+                };
+                frame.put_char(tuinix::Position { row, col: 0 }, cell);
+                row += 1;
+            }
+        }
+    }
     frame
 }
 

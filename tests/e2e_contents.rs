@@ -28,26 +28,27 @@ fn script(name: &str, body: &str) -> PathBuf {
 #[test]
 fn a_sheets_output_is_painted_into_its_content_region() {
     // The sheet runs `$SHELL -l`; a login-style script that prints a banner and
-    // then waits keeps the sheet alive and its output stable. The title row is
-    // row 0, so the banner lands on row 1 -- the first content row.
+    // then waits keeps the sheet alive and its output stable. A tall terminal
+    // stacks vertically, so the border is row 0 and the banner lands on row 1 --
+    // the first content row.
     let shell = script("banner", "echo SHEET-BANNER; exec sleep 30");
-    let mut tumu = e2e::TumuHarness::with_shell(24, 80, shell.to_str().expect("utf-8 path"));
+    let mut tumu = e2e::TumuHarness::with_shell(40, 24, shell.to_str().expect("utf-8 path"));
 
     tumu.wait_for_text("SHEET-BANNER");
 }
 
 #[test]
 fn output_goes_under_the_title_not_over_it() {
-    // The title still shows on the sheet's first row even with output painted
+    // The border still shows on the sheet's first row even with output painted
     // below it, and the banner is on the row after.
     let shell = script("under", "echo CONTENT-MARK; exec sleep 30");
-    let mut tumu = e2e::TumuHarness::with_shell(24, 80, shell.to_str().expect("utf-8 path"));
+    let mut tumu = e2e::TumuHarness::with_shell(40, 24, shell.to_str().expect("utf-8 path"));
 
     tumu.wait_for_text("CONTENT-MARK");
     let rows = tumu.screen_rows();
     assert!(
-        rows[0].contains("[0]>24x80"),
-        "the title row must stay on row 0, got: {:?}",
+        rows[0].starts_with("└ [C-q ...]"),
+        "the border must stay on row 0, got: {:?}",
         rows[0]
     );
     assert!(
@@ -62,7 +63,7 @@ fn two_sheets_each_show_their_own_output() {
     // Both sheets run the same script; each paints its banner inside its own
     // half, so a second sheet neither erases the first nor draws over it.
     let shell = script("two", "echo BOTH-MARK; exec sleep 30");
-    let mut tumu = e2e::TumuHarness::with_shell(24, 80, shell.to_str().expect("utf-8 path"));
+    let mut tumu = e2e::TumuHarness::with_shell(40, 24, shell.to_str().expect("utf-8 path"));
     tumu.wait_for_text("BOTH-MARK");
 
     tumu.send_prefix();

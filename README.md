@@ -80,8 +80,14 @@ stack comes up under the keyboard rather than the keyboard moving away.
 
 `prefix z` is a view, not a rearrangement: the focused sheet fills the
 terminal while the others keep their places, and clearing the flag brings the
-same layout straight back. The title row marks the focused sheet with a `>`
-after the index, so both of these are visible in the frame alone.
+same layout straight back.
+
+Each sheet is bounded by a line along the stack's axis -- the top edge when the
+stack is vertical, the left edge when it is horizontal -- drawn as `└` at the
+corner, the sheet's title, and `─` to the edge. Only the focused sheet's line
+carries the command label `[C-q ...]`, so which sheet the keyboard is aimed at
+is visible in the frame alone. When the stack is horizontal the border is
+written *down* its column, one character per row, so it reads the same way.
 
 Copy mode (PoC)
 -------------
@@ -124,14 +130,22 @@ programs running in the sheets -- a click belongs to tumu -- so a fuller mouse
 (giving a sheet its own report when it wants one) is still open.
 
 
-PLAN: Sheet border and menu
-----------
+Sheet border and menu
+---------------------
 
-In vertical layout, the sheet has the boarder line as follows (instead of title row that will be removed):
+In vertical layout, the sheet has the border line as follows (this replaced
+the old title row):
 
 ```
 └ [C-q ...] TITLE ───────
 ```
+
+Every sheet shows the border; only the focused sheet shows the `[C-q ...]`
+label. In horizontal layout the same line is written vertically in the sheet's
+left column.
+
+PLAN: the menu
+----------
 
 When prefix (default to C-q) is pressed or `[C-q ...]` region is clicked, then an overlay menu window will be shown on the center of the terminal:
 
@@ -147,3 +161,4 @@ When prefix (default to C-q) is pressed or `[C-q ...]` region is clicked, then a
 
 Users can be executed the command by pressing the key or clicking the region in the menu window.
 
+if unbind key is pressed or non menu region clicked, just close / cancel the menu.

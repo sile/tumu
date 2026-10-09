@@ -29,6 +29,71 @@ pub fn is_prefix(key: tuinix::KeyInput) -> bool {
     key == PREFIX
 }
 
+/// One prefix chord: the key, the command it names, and the label the menu
+/// shows for it.
+///
+/// The three live together so they cannot drift: the menu is built from this
+/// table and
+/// [`resolve_command`] answers out of it, so a chord cannot be bound without a
+/// label or labelled without being bound.
+#[derive(Debug, Clone, Copy)]
+pub struct Binding {
+    /// The key, after the prefix, that runs the command.
+    pub key: tuinix::KeyInput,
+
+    /// What the key does.
+    pub command: Command,
+
+    /// The word the menu shows next to the key.
+    pub label: &'static str,
+}
+
+/// A chord on a plain (unmodified) character, the shape every binding has.
+const fn chord(c: char) -> tuinix::KeyInput {
+    tuinix::KeyInput {
+        ctrl: false,
+        alt: false,
+        code: tuinix::KeyCode::Char(c),
+    }
+}
+
+/// Every prefix chord, in the order the menu lists them.
+///
+/// This is the order the commands are worth reading in, not the order of the
+/// keys: making a sheet, then acting on it, then leaving.
+pub const BINDINGS: &[Binding] = &[
+    Binding {
+        key: chord('n'),
+        command: Command::NewSheet,
+        label: "new sheet",
+    },
+    Binding {
+        key: chord('x'),
+        command: Command::CloseSheet,
+        label: "close sheet",
+    },
+    Binding {
+        key: chord('o'),
+        command: Command::RotateSheets,
+        label: "rotate to bottom",
+    },
+    Binding {
+        key: chord('z'),
+        command: Command::ToggleFullScreen,
+        label: "full screen",
+    },
+    Binding {
+        key: chord('l'),
+        command: Command::EditScrollback,
+        label: "edit scrollback",
+    },
+    Binding {
+        key: chord('q'),
+        command: Command::Quit,
+        label: "quit",
+    },
+];
+
 /// Resolves a latched key to the command it names, or `None` when unbound.
 ///
 /// Only the key's `ctrl`/`code` take part: no bound key carries Alt, so an
@@ -41,13 +106,15 @@ pub fn resolve_command(key: tuinix::KeyInput) -> Option<Command> {
     }
     let tuinix::KeyInput { ctrl, code, .. } = key;
 
-    Some(match (ctrl, code) {
-        (false, tuinix::KeyCode::Char('n')) => Command::NewSheet,
-        (false, tuinix::KeyCode::Char('x')) => Command::CloseSheet,
-        (false, tuinix::KeyCode::Char('o')) => Command::RotateSheets,
-        (false, tuinix::KeyCode::Char('z')) => Command::ToggleFullScreen,
-        (false, tuinix::KeyCode::Char('l')) => Command::EditScrollback,
-        (false, tuinix::KeyCode::Char('q')) => Command::Quit,
-        _ => return None,
-    })
+    BINDINGS
+        .iter()
+        .find(|binding| {
+            let tuinix::KeyInput {
+                ctrl: bound_ctrl,
+                code: bound_code,
+                ..
+            } = binding.key;
+            ctrl == bound_ctrl && code == bound_code
+        })
+        .map(|binding| binding.command)
 }

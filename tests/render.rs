@@ -1,10 +1,15 @@
 //! The renderer paints the stack, and never paints outside the frame.
 //!
 //! A sheet is drawn as its own frame and composed onto the screen, so the
-//! cases that matter are the two edges of that composition: a title clipped at
+//! cases that matter are the two edges of that composition: a border clipped at
 //! its own sheet's edge (it stops there and does not reach the neighbour) and a
-//! grid clipped at the sheet's right edge. The whole-screen frame is still the
-//! public thing, so these assert on `tumu::frame`.
+//! grid clipped at the sheet's edge. The whole-screen frame is still the public
+//! thing, so these assert on `tumu::frame`.
+//!
+//! The border runs along the stack's axis -- the top row when the stack is
+//! vertical, the left column when it is horizontal -- so a test picks a size
+//! that stacks the way it means to assert on: a tall, narrow terminal stacks
+//! vertically, a wide, short one horizontally.
 
 mod helpers_tuinix;
 
@@ -40,11 +45,25 @@ impl tumu::SheetContents for FixedGrid<'_> {
     }
 }
 
-/// Returns the text of one row of a frame, blanks skipped.
+/// Returns the text of one row of a frame, left to right.
+///
+/// Blanks are kept: a border is written with spaces in it (`└ [C-q ...]`), and
+/// a test that reads the line back must see those spaces as part of it.
 fn row_text(frame: &tuinix::Frame, row: usize) -> String {
     frame
         .chars()
-        .filter(|(position, ch)| position.row == row && !ch.is_blank())
+        .filter(|(position, _)| position.row == row)
+        .map(|(_, ch)| ch.value())
+        .collect()
+}
+
+/// Returns the text of one column of a frame, top to bottom.
+///
+/// Blanks are kept for the reason [`row_text`] keeps them.
+fn col_text(frame: &tuinix::Frame, col: usize) -> String {
+    frame
+        .chars()
+        .filter(|(position, _)| position.col == col)
         .map(|(_, ch)| ch.value())
         .collect()
 }
@@ -76,21 +95,58 @@ fn the_renderer_never_paints_outside_the_frame() {
 }
 
 #[test]
-fn a_title_row_names_each_sheet() {
-    let state = started(24, 80);
+fn a_vertical_border_names_the_focused_sheet_with_the_label() {
+    // A tall, narrow terminal stacks vertically, so the border is the top row.
+    let state = started(24, 40);
 
     let frame = tumu::frame(&state, &());
-    let first_row = row_text(&frame, 0);
+    let top = row_text(&frame, 0);
 
-    assert!(first_row.contains("[0]"), "title row was {first_row:?}");
+    // The one sheet is focused, so its border carries the command label and
+    // reads from the corner outwards, the rest of the row being rule.
+    assert!(top.starts_with("└ [C-q ...]"), "focused border was {top:?}");
+    assert!(top.contains('─'), "the rest of the border is rule: {top:?}");
 }
 
 #[test]
-fn a_narrow_sheet_does_not_leak_its_title_onto_its_neighbour() {
-    // Two sheets side by side, each 40 columns (`80x24` is a horizontal stack),
+fn an_unfocused_border_has_no_label() {
+    // Two sheets stacked vertically: the focused one (on top) carries the
+    // label, the other (below) does not.
+    let mut state = started(24, 40);
+    state.stack.push_top();
+    // Move focus off the top sheet, so the one below it is the unfocused case.
+    let second = state.stack.sheets()[1].0;
+    state.focused = Some(second);
+
+    let frame = tumu::frame(&state, &());
+
+    // Every border starts with the corner, and the label appears exactly once.
+    let screen: String = frame.chars().map(|(_, ch)| ch.value()).collect();
+    assert_eq!(screen.matches("[C-q ...]").count(), 1);
+    assert!(screen.matches('└').count() >= 2, "one corner per sheet");
+}
+
+#[test]
+fn a_horizontal_border_is_written_vertically_in_the_left_column() {
+    // A wide, short terminal stacks horizontally, so the border is the left
+    // column, the text read top to bottom.
+    let state = started(24, 80);
+
+    let frame = tumu::frame(&state, &());
+    let left = col_text(&frame, 0);
+
+    assert!(
+        left.starts_with("└ [C-q ...]"),
+        "the left column holds the border written vertically: {left:?}"
+    );
+}
+
+#[test]
+fn a_narrow_sheet_does_not_leak_its_border_onto_its_neighbour() {
+    // Two sheets side by side (`80x24` stacks horizontally), each 40 columns,
     // so the sheet at index 1 owns columns 40..80. It sets a title longer than
-    // 40 columns: the title must be clipped at its own left edge (column 40) and
-    // leave the sheet at columns 0..40 -- the other one -- untouched.
+    // 40 columns: the border must be clipped at its own left edge (column 40)
+    // and leave the sheet at columns 0..40 -- the other one -- untouched.
     let mut state = started(24, 80);
     state.stack.push_top();
     state.update(tumu::Event::TitleChanged {
@@ -99,29 +155,50 @@ fn a_narrow_sheet_does_not_leak_its_title_onto_its_neighbour() {
     });
 
     let frame = tumu::frame(&state, &());
-    let first_row = row_text(&frame, 0);
 
-    // Sheet 0's own title survives at the left, and sheet 1's overflowing `T`s
-    // did not run back over it.
-    assert!(
-        first_row.starts_with("[0]24x40"),
-        "the neighbour's own title must survive: {first_row:?}"
+    // The focused sheet (index 1, focused before the push) owns column 40 and
+    // carries the label; its overflowing `T`s must stop at its own left edge and
+    // leave sheet 0 (column 0) untouched.
+    let neighbour = col_text(&frame, 0);
+    assert_eq!(
+        neighbour,
+        format!("└{}", "─".repeat(23)),
+        "sheet 0 is unfocused: a bare corner and rule, no label and no leak"
     );
-    let t_count = first_row.chars().filter(|&ch| ch == 'T').count();
+    let focused_col = col_text(&frame, 40);
     assert!(
-        t_count <= 40,
-        "the long title leaked past its own 40 columns ({t_count} T's): {first_row:?}"
+        focused_col.starts_with("└ [C-q ...] T"),
+        "the focused border and its title survive in its own column: {focused_col:?}"
+    );
+    let leaked = frame
+        .chars()
+        .filter(|(position, ch)| ch.value() == 'T' && position.col < 40)
+        .count();
+    assert_eq!(
+        leaked, 0,
+        "the long title leaked into its neighbour's columns"
     );
 }
 
 #[test]
-fn a_sheet_with_no_contents_shows_only_its_title() {
-    let state = started(24, 80);
+fn a_sheet_with_no_contents_shows_only_its_border() {
+    // Tall enough to stack vertically and wide enough that the border's text
+    // fits on its row (a narrower sheet clips the label itself, which is its
+    // own case elsewhere).
+    let state = started(24, 40);
 
     let frame = tumu::frame(&state, &());
 
-    assert_eq!(row_text(&frame, 0), "[0]>24x80");
-    assert_eq!(row_text(&frame, 1), "", "the content rows are blank");
+    assert!(
+        row_text(&frame, 0).starts_with("└ [C-q ...]"),
+        "the border is the only thing drawn"
+    );
+    // Composing a sheet frame paints its whole rectangle, so the rows below the
+    // border are blank cells rather than absent ones.
+    assert!(
+        row_text(&frame, 1).trim().is_empty(),
+        "the content rows carry no text"
+    );
 }
 
 #[test]
@@ -137,12 +214,13 @@ fn contents_are_painted_below_the_title_and_clipped_at_the_sheet_edge() {
         }
     }
 
-    // One sheet, 4 rows tall and `cols` wide, with a grid whose first row is
-    // longer than the sheet is wide. The title owns row 0; the grid starts at
-    // row 1 and must stop at the sheet's right edge.
-    const COLS: usize = 8;
-    let state = started(4, COLS);
-    let long: Vec<Cell> = "abcdefghij".chars().map(cell).collect();
+    // One sheet, tall enough to stack vertically while still wide enough for
+    // the border's text, with a grid whose first row is longer than the sheet is
+    // wide. The border owns row 0; the grid starts at row 1 and must stop at
+    // the sheet's right edge.
+    const COLS: usize = 20;
+    let state = started(24, COLS);
+    let long: Vec<Cell> = "abcdefghijklmnopqrstuvwxyz".chars().map(cell).collect();
     let rows = vec![long.as_slice()];
     let grid = tumu::SheetGrid {
         rows,
@@ -153,10 +231,13 @@ fn contents_are_painted_below_the_title_and_clipped_at_the_sheet_edge() {
 
     let frame = tumu::frame(&state, &contents);
 
-    assert_eq!(row_text(&frame, 0), format!("[0]>4x{COLS}"));
+    assert!(
+        row_text(&frame, 0).starts_with("└ [C-q ...]"),
+        "the border owns row 0"
+    );
     assert_eq!(
         row_text(&frame, 1),
-        "abcdefgh",
+        "abcdefghijklmnopqrst",
         "the grid is clipped to {COLS} columns"
     );
 

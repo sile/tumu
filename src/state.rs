@@ -81,6 +81,18 @@ impl State {
         }
     }
 
+    /// Returns the axis the stack is laid out along at the current size.
+    ///
+    /// The renderer needs it to know which edge of a sheet carries the border:
+    /// the top edge when the stack runs vertically, the left edge when it runs
+    /// horizontally. It is the same function the stack splits its regions with
+    /// ([`orientation_with_default_factor`](crate::orientation_with_default_factor))
+    /// read from the same size, so the border's edge and the split's axis
+    /// cannot disagree.
+    pub fn orientation(&self) -> crate::Orientation {
+        crate::orientation_with_default_factor(self.size)
+    }
+
     /// Returns the index of the focused sheet, or `None` when there is none.
     ///
     /// The stack search is what keeps focus honest: a focus that names a sheet

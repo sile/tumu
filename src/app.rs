@@ -551,7 +551,9 @@ impl App {
         let Some(region) = self.state.region_of(index) else {
             return Ok(());
         };
-        let Some(size) = tumu::terminal_size_to_cell_size(tumu::sheet_content_size(region.size))
+        let orientation = self.state.orientation();
+        let Some(size) =
+            tumu::terminal_size_to_cell_size(tumu::sheet_content_size(region.size, orientation))
         else {
             return Ok(());
         };
@@ -653,7 +655,9 @@ impl App {
     fn focused_cursor(&self) -> Option<tuinix::Position> {
         let index = self.state.focused_index()?;
         let region = self.state.region_of(index)?;
-        let content_size = tumu::sheet_content_size(region.size);
+        let orientation = self.state.orientation();
+        let content_size = tumu::sheet_content_size(region.size, orientation);
+        let content_origin = tumu::sheet_content_origin(orientation);
         let session_id = self.session_at(index)?;
         let session = self.sessions.get(&session_id)?;
         let terminal = session.terminal_state();
@@ -667,8 +671,8 @@ impl App {
             return None;
         }
         Some(tuinix::Position {
-            row: region.position.row + 1 + usize::from(cursor.row),
-            col: region.position.col + usize::from(cursor.col),
+            row: region.position.row + content_origin.row + usize::from(cursor.row),
+            col: region.position.col + content_origin.col + usize::from(cursor.col),
         })
     }
 
