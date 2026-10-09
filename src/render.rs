@@ -208,6 +208,16 @@ pub fn frame(state: &State, contents: &impl SheetContents) -> tuinix::Frame {
         }
         screen.put_frame(region.position, &sheet_frame);
     }
+
+    // The menu is painted last, over everything: it is a view laid on top of
+    // the stack, so it may cover parts of several sheets. It is not part of the
+    // layout, so it is composed here rather than by `regions()`.
+    if state.menu
+        && let Some(layout) = state.menu_layout()
+    {
+        screen.put_frame(layout.region.position, &menu_frame(&layout));
+    }
+
     screen
 }
 
@@ -222,14 +232,21 @@ const BORDER_CORNER: char = '└';
 /// The rule the rest of a border is drawn with.
 const BORDER_RULE: char = '─';
 
-/// The label the focused sheet shows where a command can be started.
+/// Returns the label the focused sheet shows where a command can be started.
 ///
 /// It is the prefix key written the way it is pressed, followed by a mark that
 /// more can follow -- the ellipsis the README draws -- so a sheet says that the
 /// keyboard is aimed at it and that a command is one key away. Only the focused
-/// sheet shows it; every other sheet's border starts straight into its label,
+/// sheet shows it; every other sheet's border starts straight into its title,
 /// which is what makes the sheet under the keyboard obvious at a glance.
-const BORDER_LABEL: &str = "[C-q ...]";
+///
+/// The key text is derived from the prefix ([`prefix_key_text`]), not written
+/// here again, so restoring the prefix to `C-o` changes this label with it.
+///
+/// [`prefix_key_text`]: crate::input::prefix_key_text
+fn border_label() -> String {
+    format!("[{} ...]", crate::input::prefix_key_text())
+}
 
 /// Draws one sheet's border into a fresh frame of size `size`.
 ///
@@ -263,7 +280,7 @@ pub fn sheet_frame(
     line.push(BORDER_CORNER);
     if focused {
         line.push(' ');
-        line.push_str(BORDER_LABEL);
+        line.push_str(&border_label());
         line.push(' ');
     }
     if !sheet.title.is_empty() {
@@ -312,6 +329,68 @@ pub fn sheet_frame(
             }
         }
     }
+    frame
+}
+
+/// Paints the prefix menu into a fresh frame the size of the screen.
+///
+/// The box is drawn where [`MenuLayout`](crate::MenuLayout) says: a top border, a
+/// header row naming the two columns, one row per binding, the send-prefix row,
+/// and a bottom border. Each row is the box's interior width, so a click
+/// anywhere across a row selects it, matching what
+/// [`MenuLayout::command_at`](crate::MenuLayout::command_at) tests.
+///
+/// The frame is the size of the screen so the renderer can compose it over the
+/// sheet frames with [`Frame::put_frame`](tuinix::Frame::put_frame) at the
+/// origin; only the box's rectangle is written, so the rest is blank and, being
+/// blank, leaves the sheets under it alone when composed.
+///
+/// [`MenuLayout`]: crate::MenuLayout
+pub fn menu_frame(layout: &crate::MenuLayout) -> tuinix::Frame {
+    let mut frame = tuinix::Frame::new(layout.region.size);
+    let width = layout.region.size.cols;
+
+    // Writes `text` at the start of row `row`, one character per cell.
+    let mut put_line = |row: usize, text: &str| {
+        let mut position = tuinix::Position { row, col: 0 };
+        for ch in text.chars() {
+            if let Some(cell) = tuinix::Char::new(ch, 1, tuinix::Style::RESET) {
+                position = frame.put_char(position, cell);
+            }
+        }
+    };
+
+    // The top and bottom borders: a corner, a rule, and the opposite corner.
+    let inner_width = width.saturating_sub(2);
+    let border = |left_corner: char, right_corner: char| {
+        let mut line = String::new();
+        line.push(left_corner);
+        for _ in 0..inner_width {
+            line.push(BORDER_RULE);
+        }
+        line.push(right_corner);
+        line
+    };
+    let bottom_row = layout.region.size.rows - 1;
+    put_line(0, &border('┌', '┐'));
+    put_line(bottom_row, &border('└', '┘'));
+
+    // A content row: `| key  label |`, the two columns padded to their fixed
+    // widths so the labels line up across rows. The row's screen row is turned
+    // into a frame row by subtracting the box's top, since the frame is the box
+    // alone and is composed at the box's position.
+    for row in &layout.rows {
+        let text = format!(
+            "│ {key:<key_width$}{gap}{label:<label_width$} │",
+            key = row.key,
+            key_width = layout.key_width,
+            gap = " ".repeat(crate::menu::GAP),
+            label = row.label,
+            label_width = layout.label_width,
+        );
+        put_line(row.region.position.row - layout.region.position.row, &text);
+    }
+
     frame
 }
 

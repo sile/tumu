@@ -586,3 +586,110 @@ fn clicking_a_stacked_sheet_uses_the_derived_layout() {
     state.update(tumu::Event::Mouse(click(1, 5)));
     assert_eq!(state.focused, Some(top));
 }
+
+#[test]
+fn arming_the_prefix_opens_the_menu_and_the_next_key_closes_it() {
+    let mut state = state_with(24, 80, 2);
+    assert!(!state.menu, "the menu starts closed");
+
+    state.update(tumu::Event::Key(tumu::PREFIX));
+    assert!(state.menu, "the prefix opens the menu");
+
+    // A bound key runs its command and closes the menu.
+    state.update(tumu::Event::Key(ch('x')));
+    assert!(!state.menu, "the chord closes the menu");
+    assert!(!state.prefix, "and the latch too");
+}
+
+#[test]
+fn an_unbound_key_closes_the_menu_and_does_nothing_else() {
+    let mut state = state_with(24, 80, 1);
+    state.update(tumu::Event::Key(tumu::PREFIX));
+    assert!(state.menu);
+
+    let actions = state.update(tumu::Event::Key(ch('Z')));
+
+    assert!(actions.is_empty(), "an unbound chord emits nothing");
+    assert!(!state.menu, "but it dismisses the menu");
+    assert!(!state.prefix);
+}
+
+#[test]
+fn the_prefix_again_sends_the_prefix_and_closes_the_menu() {
+    let mut state = state_with(24, 80, 1);
+    state.update(tumu::Event::Key(tumu::PREFIX));
+
+    let actions = state.update(tumu::Event::Key(tumu::PREFIX));
+
+    assert_eq!(actions, vec![send_to_top(tumu::PREFIX)]);
+    assert!(!state.menu);
+}
+
+#[test]
+fn clicking_a_menu_row_runs_its_command_and_closes_the_menu() {
+    let mut state = state_with(40, 80, 2);
+    state.update(tumu::Event::Key(tumu::PREFIX));
+    let layout = state.menu_layout().expect("the menu fits 40x80");
+
+    // Click the row that closes a sheet.
+    let row = layout
+        .rows
+        .iter()
+        .find(|row| row.command == Some(tumu::Command::CloseSheet))
+        .expect("a close-sheet row");
+    let actions = state.update(tumu::Event::Mouse(click(
+        row.region.position.row,
+        row.region.position.col + 1,
+    )));
+
+    assert!(!state.menu, "selecting a row closes the menu");
+    assert_eq!(state.stack.len(), 1, "the focused sheet was closed");
+    assert!(
+        actions
+            .iter()
+            .any(|action| matches!(action, tumu::Action::CloseSession { .. })),
+        "closing a sheet asks the edge to close its session"
+    );
+}
+
+#[test]
+fn clicking_the_menu_border_dismisses_it() {
+    let mut state = state_with(40, 80, 2);
+    state.update(tumu::Event::Key(tumu::PREFIX));
+    let layout = state.menu_layout().expect("the menu fits 40x80");
+    let corner = layout.region.position;
+
+    let actions = state.update(tumu::Event::Mouse(click(corner.row, corner.col)));
+
+    assert!(!state.menu, "a border click dismisses");
+    assert!(actions.is_empty(), "and runs nothing");
+    assert_eq!(state.stack.len(), 2, "the stack is untouched");
+}
+
+#[test]
+fn clicking_the_focused_sheets_border_label_opens_the_menu() {
+    // A tall terminal stacks vertically, so the focused border is its top row.
+    let mut state = state_with(40, 30, 1);
+    let region = state.region_of(0).expect("the sheet's region");
+
+    state.update(tumu::Event::Mouse(click(
+        region.position.row,
+        region.position.col + 2,
+    )));
+
+    assert!(state.menu, "a click on the label opens the menu");
+}
+
+#[test]
+fn a_screen_too_small_for_the_box_shows_no_menu() {
+    // Four columns cannot hold the box, so the prefix arms the latch but opens
+    // nothing -- the flag tracks what is on screen, so a click can never land on
+    // a menu that was not drawn.
+    let mut state = state_with(40, 4, 1);
+
+    state.update(tumu::Event::Key(tumu::PREFIX));
+
+    assert!(state.prefix, "the latch still arms");
+    assert!(!state.menu, "but there is no menu to show");
+    assert!(state.menu_layout().is_none());
+}

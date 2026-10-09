@@ -144,21 +144,24 @@ Every sheet shows the border; only the focused sheet shows the `[C-q ...]`
 label. In horizontal layout the same line is written vertically in the sheet's
 left column.
 
-PLAN: the menu
-----------
+The menu
+--------
 
-When prefix (default to C-q) is pressed or `[C-q ...]` region is clicked, then an overlay menu window will be shown on the center of the terminal:
+When the prefix (default to C-q) is pressed, or the `[C-q ...]` label is
+clicked, an overlay menu window is shown on the center of the terminal:
 
 ```
    ┌────────────────┐
    │ n    new sheet │
    │ x    ...       │
-   | o    ...       │
-   | ...            │
-   | C-q ...        │
+   | o    ...       |
+   | ...            |
+   | C-q  send prefix
    └────────────────┘
 ```
 
-Users can be executed the command by pressing the key or clicking the region in the menu window.
-
-if unbind key is pressed or non menu region clicked, just close / cancel the menu.
+The menu lists every prefix chord. Its rows come from the same table the keys
+are resolved from, so a chord cannot be bound without appearing in the menu, or
+listed without being bound. A command is run by pressing its key or by clicking
+anywhere on its row. If an unbound key is pressed, or a region other than a
+command row is clicked, the menu is closed and nothing else happens.

@@ -245,3 +245,63 @@ fn contents_are_painted_below_the_title_and_clipped_at_the_sheet_edge() {
         assert!(position.col < COLS, "col {position:?} within {COLS}");
     }
 }
+
+#[test]
+fn the_menu_is_painted_over_the_sheets_when_it_is_open() {
+    let mut state = started(24, 40);
+    assert!(!state.menu, "the menu is closed at startup");
+
+    state.menu = true;
+    let frame = tumu::frame(&state, &());
+    let text: String = frame.chars().map(|(_, ch)| ch.value()).collect();
+
+    // The box's corner and the header are on screen.
+    assert!(text.contains('┌'), "a menu box is drawn");
+    assert!(
+        text.contains("command"),
+        "the header names the label column"
+    );
+
+    // Every binding has a row naming its key and its label.
+    for binding in tumu::BINDINGS {
+        let key = tumu::chord_text(binding);
+        assert!(text.contains(&key), "the menu lists the key {key}");
+        assert!(
+            text.contains(binding.label),
+            "the menu lists {}",
+            binding.label
+        );
+    }
+}
+
+#[test]
+fn a_closed_menu_paints_nothing_over_the_sheets() {
+    let mut state = started(24, 40);
+    state.menu = false;
+
+    let frame = tumu::frame(&state, &());
+    let text: String = frame.chars().map(|(_, ch)| ch.value()).collect();
+
+    assert!(!text.contains('┌'), "no box when the menu is closed");
+    assert!(!text.contains("command"), "no header either");
+}
+
+#[test]
+fn the_menu_paints_the_rows_the_layout_names() {
+    let mut state = started(24, 40);
+    state.menu = true;
+    let layout = state.menu_layout().expect("the menu fits 24x40");
+    let frame = tumu::frame(&state, &());
+
+    // Every command row's own screen row shows its key and its label, so the
+    // renderer and the hit-test use the same rectangles.
+    for row in &layout.rows {
+        let line = row_text(&frame, row.region.position.row);
+        assert!(line.contains(&row.key), "row {:?} shows its key", row.key);
+        assert!(
+            line.contains(&row.label),
+            "row {:?} shows its label",
+            row.label
+        );
+    }
+}

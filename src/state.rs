@@ -44,6 +44,15 @@ pub struct State {
     /// [`handle_key`](State::handle_key) for the rule.
     pub prefix: bool,
 
+    /// Whether the prefix menu is shown.
+    ///
+    /// Like full screen, it is a *view*: it changes no sheet's region, no
+    /// session is resized, and the stack is untouched. It is painted over the
+    /// composed screen, and its layout is a pure function of the size and the
+    /// bindings -- so, like full screen, nothing has to be put back on the way
+    /// out.
+    pub menu: bool,
+
     /// Whether the focused sheet is shown full screen.
     ///
     /// Full screen is a *view*, not a rearrangement. It is a single flag rather
@@ -75,6 +84,7 @@ impl State {
             stack: Stack::new(),
             size,
             prefix: false,
+            menu: false,
             full_screen: false,
             focused: None,
             exit: false,
@@ -91,6 +101,17 @@ impl State {
     /// cannot disagree.
     pub fn orientation(&self) -> crate::Orientation {
         crate::orientation_with_default_factor(self.size)
+    }
+
+    /// Returns the menu's layout at the current size, or `None` when it does
+    /// not fit.
+    ///
+    /// This is the one place the menu's geometry is derived, so the renderer and
+    /// [`handle_mouse`](State::handle_mouse) test the same rectangles: a click
+    /// lands on a command exactly when the row the renderer drew for that
+    /// command was clicked.
+    pub fn menu_layout(&self) -> Option<crate::MenuLayout> {
+        crate::menu_layout(self.size, &crate::input::prefix_key_text())
     }
 
     /// Returns the index of the focused sheet, or `None` when there is none.
@@ -155,7 +176,34 @@ impl State {
         if mouse.kind != tuinix::MouseInputKind::LeftPress {
             return Vec::new();
         }
-        if let Some(index) = self.sheet_at(mouse.position)
+        let position = mouse.position;
+
+        // The menu, when it is up, gets first refusal: a click on a command row
+        // runs it, and a click anywhere else in the box dismisses the menu. This
+        // is tested before anything else so a menu drawn over a sheet does not
+        // let a click fall through to the sheet under it.
+        if self.menu {
+            let layout = self.menu_layout();
+            let command = layout
+                .as_ref()
+                .and_then(|layout| layout.command_at(position));
+            self.menu = false;
+            return match command {
+                Some(command) => self.handle_command(command),
+                None => Vec::new(),
+            };
+        }
+
+        // The command label opens the menu. Only the focused sheet draws one, so
+        // only its border line can be clicked, and the click does not move the
+        // focus: the menu is about the focused sheet, and a click on the label
+        // must not quietly change which sheet that is.
+        if self.label_at(position) {
+            self.menu = true;
+            return Vec::new();
+        }
+
+        if let Some(index) = self.sheet_at(position)
             && let Some((id, _)) = self.stack.sheets().get(index)
         {
             self.focused = Some(*id);
@@ -163,6 +211,44 @@ impl State {
         // Focus is a pure state change: nothing has to be spawned, resized, or
         // written to a child. The edge repaints because the frame changed.
         Vec::new()
+    }
+
+    /// Returns whether `position` is on the focused sheet's command label.
+    ///
+    /// The label is the border line of the focused sheet: the top row of a
+    /// vertical sheet, the left column of a horizontal one. Only the label's own
+    /// part of the line is meant, but a click anywhere along the line accepts --
+    /// the border *is* the affordance, and separating the label's few cells from
+    /// the rule's many would make the target smaller than the thing drawn.
+    ///
+    /// A hidden sheet (full screen elsewhere) has an empty region, and a stack
+    /// with no focus has no label, so neither can be clicked.
+    fn label_at(&self, position: tuinix::Position) -> bool {
+        let orientation = self.orientation();
+        self.regions()
+            .iter()
+            .zip(self.stack.sheets())
+            .enumerate()
+            .any(|(index, (region, _))| {
+                if Some(index) != self.focused_index() {
+                    return false;
+                }
+                if region.size.rows == 0 || region.size.cols == 0 {
+                    return false;
+                }
+                match orientation {
+                    crate::Orientation::Vertical => {
+                        position.row == region.position.row
+                            && position.col >= region.position.col
+                            && position.col < region.position.col + region.size.cols
+                    }
+                    crate::Orientation::Horizontal => {
+                        position.col == region.position.col
+                            && position.row >= region.position.row
+                            && position.row < region.position.row + region.size.rows
+                    }
+                }
+            })
     }
 
     /// Returns the index of the sheet under `position`, or `None` when the
@@ -181,8 +267,8 @@ impl State {
     ///
     /// The rule, which is the prefix latch the README names:
     ///
-    /// - Unlatched, the key is the prefix: arm the latch and report
-    ///   [`Action::PrefixPending`] so the edge can show a command is pending.
+    /// - Unlatched, the key is the prefix: arm the latch, open the
+    ///   [`menu`](State::menu), and report [`Action::PrefixPending`].
     /// - Latched, the key is the prefix itself: clear the latch and forward the
     ///   prefix to the focused sheet, so a bare prefix can still be typed. This
     ///   is tmux's *send-prefix*.
@@ -191,23 +277,37 @@ impl State {
     ///   prefix was a command that resolved to nothing, not a keystroke.
     /// - Unlatched, any other key: forward it to the focused sheet.
     ///
-    /// A forwarded key is dropped when the stack is empty, rather than sent to
-    /// nowhere.
+    /// The menu opens with the latch and closes with it, so what is on screen and
+    /// what the next key means are never out of step. A forwarded key is dropped
+    /// when the stack is empty, rather than sent to nowhere.
     fn handle_key(&mut self, key: tuinix::KeyInput) -> Vec<Action> {
         if !self.prefix {
             if crate::input::is_prefix(key) {
                 self.prefix = true;
+                // Arming the prefix also opens the menu, so the chords are
+                // visible while one is being chosen, not just known by heart.
+                // A screen too small for the box shows no menu -- the flag
+                // tracks what is on screen, so a click never lands on a menu
+                // that was not drawn.
+                self.menu = self.menu_layout().is_some();
                 return vec![Action::PrefixPending];
             }
             return self.send_key(key);
         }
 
+        // From here the prefix is latched. Whichever key arrived, the latch
+        // clears and the menu closes: the chord is one key, and the menu is the
+        // face of that one key.
         self.prefix = false;
+        self.menu = false;
         if crate::input::is_prefix(key) {
             return self.send_key(key);
         }
         match crate::input::resolve_command(key) {
             Some(command) => self.handle_command(command),
+            // An unbound key dismisses the menu and does nothing else: the
+            // prefix was a command that resolved to nothing, not a keystroke to
+            // forward.
             None => Vec::new(),
         }
     }

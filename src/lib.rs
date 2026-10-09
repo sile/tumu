@@ -25,6 +25,7 @@ mod event;
 mod geometry;
 mod id;
 mod input;
+mod menu;
 mod orientation;
 mod ratio;
 mod render;
@@ -41,13 +42,14 @@ pub use geometry::{
 };
 pub use id::{SheetId, TermnixSessionId};
 pub use input::{BINDINGS, Binding, PREFIX};
+pub use menu::{MenuLayout, MenuRow, SEND_PREFIX_LABEL, chord_text, menu_layout};
 pub use orientation::{
     DEFAULT_CELL_ASPECT, Orientation, orientation, orientation_with_default_factor,
 };
 pub use ratio::Ratio;
 pub use render::{
-    SheetContents, SheetGrid, draw_sheet_grid, frame, sheet_content_origin, sheet_content_size,
-    sheet_frame,
+    SheetContents, SheetGrid, draw_sheet_grid, frame, menu_frame, sheet_content_origin,
+    sheet_content_size, sheet_frame,
 };
 pub use sheet::Sheet;
 pub use stack::Stack;

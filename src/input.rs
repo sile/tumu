@@ -21,6 +21,24 @@ pub const PREFIX: tuinix::KeyInput = tuinix::KeyInput {
     code: tuinix::KeyCode::Char('q'),
 };
 
+/// Returns the prefix written the way it is pressed, for the border and the
+/// menu: `C-q` today.
+///
+/// It is derived from [`PREFIX`] rather than written a second time, so restoring
+/// the prefix to `C-o` changes this with it.
+pub fn prefix_key_text() -> String {
+    let base = match PREFIX.code {
+        tuinix::KeyCode::Char(c) => c.to_string(),
+        other => format!("{other:?}"),
+    };
+    match (PREFIX.ctrl, PREFIX.alt) {
+        (false, false) => base,
+        (true, false) => format!("C-{base}"),
+        (false, true) => format!("M-{base}"),
+        (true, true) => format!("C-M-{base}"),
+    }
+}
+
 /// Returns whether `key` is the prefix.
 ///
 /// The prefix is matched on the whole key -- Ctrl on, Alt off -- so an
