@@ -122,3 +122,28 @@ screen is not there to point at.
 Only the left button does something so far. Nothing is forwarded to the
 programs running in the sheets -- a click belongs to tumu -- so a fuller mouse
 (giving a sheet its own report when it wants one) is still open.
+
+
+PLAN: Sheet border and menu
+----------
+
+In vertical layout, the sheet has the boarder line as follows (instead of title row that will be removed):
+
+```
+└ [C-q ...] TITLE ───────
+```
+
+When prefix (default to C-q) is pressed or `[C-q ...]` region is clicked, then an overlay menu window will be shown on the center of the terminal:
+
+```
+   ┌────────────────┐
+   │ n    new sheet │
+   │ x    ...       │
+   | o    ...       │
+   | ...            │
+   | C-q ...        │
+   └────────────────┘
+```
+
+Users can be executed the command by pressing the key or clicking the region in the menu window.
+
