@@ -6,32 +6,60 @@
 //! just in the core's unit tests. A title carries a marker after the index --
 //! `>` on the focused sheet, a space on the rest -- so the assertions below
 //! double as a check on where focus is.
+//!
+//! Every test pins `$SHELL` to a silent script, so a sheet's title row shows
+//! only tumu's own `[index] marker size` text. A real login shell sets a window
+//! title of its own (fish does, on every prompt), which would land in the title
+//! row and make assertions about *tumu's* text flaky.
 
 mod e2e;
+
+use std::fs;
+use std::path::PathBuf;
+
+/// Writes a silent shell script -- one that never sets a title -- and returns
+/// its path. The script just sleeps, so the sheet stays alive and quiet.
+fn silent_shell(name: &str) -> PathBuf {
+    let path = std::env::temp_dir().join(format!("tumu-keys-{}-{}.sh", std::process::id(), name));
+    fs::write(&path, "#!/bin/sh\nexec sleep 30\n").expect("failed to write the test script");
+    let mut perms = fs::metadata(&path).expect("stat the script").permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+    fs::set_permissions(&path, perms).expect("chmod the script");
+    path
+}
+
+/// Opens a harness whose sheets run a silent shell.
+fn harness(name: &str) -> e2e::TumuHarness {
+    let shell = silent_shell(name);
+    e2e::TumuHarness::with_shell(24, 80, shell.to_str().expect("utf-8 path"))
+}
 
 #[test]
 fn a_new_sheet_stacks_on_top() {
     // 24x80 is wider than tall, so the stack lays out horizontally and two
     // sheets split the columns 40/40. The new sheet goes on top, so it is at
     // index 0 and takes the focus; the old sheet 0 slides down to index 1.
-    let mut tumu = e2e::TumuHarness::open();
+    let mut tumu = harness("stacks-on-top");
     tumu.wait_for_text("[0]>24x80");
 
     tumu.send_prefix();
     tumu.send_char('n');
 
     tumu.wait_for_text("[0]>24x40");
-    // The sheet that was 0 took the other half, and lost the focus marker.
-    assert!(tumu.screen_contains("[1] 24x40"));
+    // The sheet that was 0 took the other half, and lost the focus marker. Both
+    // titles repaint in one frame, so wait for the second rather than reading it
+    // out of a frame that may still hold the previous one.
+    tumu.wait_for_text("[1] 24x40");
 }
 
 #[test]
 fn closing_the_focused_sheet_grows_the_rest() {
-    let mut tumu = e2e::TumuHarness::open();
+    let mut tumu = harness("closing-grows");
     tumu.wait_for_text("[0]>24x80");
     tumu.send_prefix();
     tumu.send_char('n');
     tumu.wait_for_text("[0]>24x40");
+    tumu.wait_for_text("[1] 24x40");
 
     // Close the focused sheet: the one on top.
     tumu.send_prefix();
@@ -44,28 +72,32 @@ fn closing_the_focused_sheet_grows_the_rest() {
 
 #[test]
 fn the_rotate_command_brings_the_stack_up_under_the_keyboard() {
-    let mut tumu = e2e::TumuHarness::open();
+    let mut tumu = harness("rotate");
     tumu.wait_for_text("[0]>24x80");
     tumu.send_prefix();
     tumu.send_char('n');
     tumu.wait_for_text("[0]>24x40");
+    tumu.wait_for_text("[1] 24x40");
 
     tumu.send_prefix();
     tumu.send_char('o');
 
     // Rotating moves the top sheet to the bottom, so the sheet that was at
-    // index 1 comes up to index 0 and takes the focus with it.
+    // index 1 comes up to index 0 and takes the focus with it. Both titles are
+    // `24x40` after the rotation either way, so the assertion that distinguishes
+    // them is the focus marker, which has moved.
     tumu.wait_for_text("[0]>24x40");
-    assert!(tumu.screen_contains("[1] 24x40"));
+    tumu.wait_for_text("[1] 24x40");
 }
 
 #[test]
 fn the_full_screen_command_fills_the_terminal_and_folds_back() {
-    let mut tumu = e2e::TumuHarness::open();
+    let mut tumu = harness("full-screen");
     tumu.wait_for_text("[0]>24x80");
     tumu.send_prefix();
     tumu.send_char('n');
     tumu.wait_for_text("[0]>24x40");
+    tumu.wait_for_text("[1] 24x40");
 
     tumu.send_prefix();
     tumu.send_char('z');
@@ -79,12 +111,12 @@ fn the_full_screen_command_fills_the_terminal_and_folds_back() {
 
     // Folding back restores both, with focus where it was.
     tumu.wait_for_text("[0]>24x40");
-    assert!(tumu.screen_contains("[1] 24x40"));
+    tumu.wait_for_text("[1] 24x40");
 }
 
 #[test]
 fn the_quit_command_exits() {
-    let mut tumu = e2e::TumuHarness::open();
+    let mut tumu = harness("quit");
     tumu.wait_for_text("[0]>24x80");
 
     tumu.send_prefix();

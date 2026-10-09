@@ -551,8 +551,8 @@ impl App {
         let Some(region) = self.state.region_of(index) else {
             return Ok(());
         };
-        let content = tumu::sheet_content_region(region);
-        let Some(size) = tumu::terminal_size_to_cell_size(content.size) else {
+        let Some(size) = tumu::terminal_size_to_cell_size(tumu::sheet_content_size(region.size))
+        else {
             return Ok(());
         };
         let mut command = self.shell.command();
@@ -623,15 +623,15 @@ impl App {
 
     /// Renders the state and writes only what changed to the terminal.
     ///
-    /// The core lays down the chrome -- the title row of every visible sheet --
-    /// and then each sheet's session grid is painted into its *content* region,
-    /// the rows below the title. The two do not overlap, so the order between
-    /// them does not matter; painting the contents after the chrome keeps a grid
-    /// out of the chrome's way. The grid paint is edge work because it needs the
-    /// sessions, which the core does not hold.
+    /// The core draws the whole screen -- each visible sheet is a frame of its
+    /// own, composed into the screen -- and the grids it draws under each title
+    /// come from the sessions, which the core does not hold. So the edge hands
+    /// the core a [`tumu::SheetContents`], which is `App` itself (its
+    /// [`SheetContents::grid`](tumu::SheetContents::grid) answers "what does
+    /// sheet `index` show?" from `self.sessions`), and the core stays the one
+    /// place a frame is built.
     fn render(&mut self) -> std::io::Result<()> {
-        let mut frame = tumu::frame(&self.state);
-        self.paint_sheet_contents(&mut frame);
+        let frame = tumu::frame(&self.state, self);
         let cursor = self.focused_cursor();
         let out = frame.render(self.previous.as_ref(), cursor);
         self.driver_mut().write_all(&out)?;
@@ -641,62 +641,34 @@ impl App {
         Ok(())
     }
 
-    /// Paints each visible sheet's session grid into the frame.
+    /// Returns the terminal cursor for the focused sheet, if its session
+    /// reports one and it is inside the sheet's content region.
     ///
-    /// A sheet with no session, or one the full screen hides, is left blank: a
-    /// hidden sheet's region is empty, so the grid loop writes nothing. The grid
-    /// goes into the sheet's content region, below its title row, so it never
-    /// covers the title. The grid rows are borrowed from the session for the
-    /// duration of the call and copied into the frame, so the session is free to
-    /// move on afterwards.
-    fn paint_sheet_contents(&self, frame: &mut tuinix::Frame) {
-        for (index, region) in self.state.regions().into_iter().enumerate() {
-            if region.size.rows == 0 || region.size.cols == 0 {
-                continue;
-            }
-            let Some(session_id) = self.session_at(index) else {
-                continue;
-            };
-            let Some(session) = self.sessions.get(&session_id) else {
-                continue;
-            };
-            let terminal = session.terminal_state();
-            let rows: Vec<&[termnix::Cell]> = terminal.rows().collect();
-            let grid = tumu::SheetGrid {
-                rows: &rows,
-                cursor: terminal.cursor(),
-                cursor_visible: terminal.modes().cursor_visible,
-            };
-            tumu::draw_sheet_grid(frame, tumu::sheet_content_region(region), &grid);
-        }
-    }
-
-    /// The terminal cursor for the focused sheet, if its session reports one.
-    ///
-    /// The cursor is the session's own position translated into the sheet's
-    /// *content* region, one row below the sheet's origin for the title. A
-    /// hidden cursor (`?25l`), or one outside the content region, is not shown:
-    /// the content region is what the session owns, and drawing a cursor
-    /// outside it would land on the title or another sheet.
+    /// The cursor is the session's own position moved into the sheet's content
+    /// frame, which sits one row below the sheet's origin for the title, and
+    /// then into the screen at the sheet's region. A hidden cursor (`?25l`), or
+    /// one outside the content region, is not shown: the content region is what
+    /// the session owns, and drawing a cursor outside it would land on the title
+    /// or another sheet. The `+ 1` is that title row.
     fn focused_cursor(&self) -> Option<tuinix::Position> {
         let index = self.state.focused_index()?;
+        let region = self.state.region_of(index)?;
+        let content_size = tumu::sheet_content_size(region.size);
         let session_id = self.session_at(index)?;
         let session = self.sessions.get(&session_id)?;
         let terminal = session.terminal_state();
         if !terminal.modes().cursor_visible {
             return None;
         }
-        let region = self.state.region_of(index)?;
-        let content = tumu::sheet_content_region(region);
         let cursor = terminal.cursor();
-        if usize::from(cursor.row) >= content.size.rows
-            || usize::from(cursor.col) >= content.size.cols
+        if usize::from(cursor.row) >= content_size.rows
+            || usize::from(cursor.col) >= content_size.cols
         {
             return None;
         }
         Some(tuinix::Position {
-            row: content.position.row + usize::from(cursor.row),
-            col: content.position.col + usize::from(cursor.col),
+            row: region.position.row + 1 + usize::from(cursor.row),
+            col: region.position.col + usize::from(cursor.col),
         })
     }
 
@@ -809,6 +781,30 @@ impl App {
             rows.push(row_text(row));
         }
         Some(rows.join("\n"))
+    }
+}
+
+impl tumu::SheetContents for App {
+    /// Returns the grid a sheet shows, as the core's [`SheetContents`] sees it.
+    ///
+    /// A sheet with no session, or one the full screen hides, has no grid: a
+    /// hidden sheet's region is empty, so the core never asks for it, and a sheet
+    /// without a session has nothing to show.
+    ///
+    /// The rows are collected into a `Vec` per call, because
+    /// [`Session`](termnix::Session) exposes its rows as an *iterator* of
+    /// borrowed slices rather than a slice. The cells are still borrowed, so the
+    /// grid is cheap and the session's memory is never copied; the `Vec` is
+    /// rebuilt per frame, which is fine at this size.
+    fn grid(&self, index: usize) -> Option<tumu::SheetGrid<'_>> {
+        let session_id = self.session_at(index)?;
+        let session = self.sessions.get(&session_id)?;
+        let terminal = session.terminal_state();
+        Some(tumu::SheetGrid {
+            rows: terminal.rows().collect(),
+            cursor: terminal.cursor(),
+            cursor_visible: terminal.modes().cursor_visible,
+        })
     }
 }
 
