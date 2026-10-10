@@ -94,8 +94,9 @@ impl State {
     /// Returns the axis the stack is laid out along at the current size.
     ///
     /// The renderer needs it to know which edge of a sheet carries the border:
-    /// the top edge when the stack runs vertically, the left edge when it runs
-    /// horizontally. It is the same function the stack splits its regions with
+    /// the last row when the stack runs vertically, the last column when it
+    /// runs horizontally. It is the same function the stack splits its regions
+    /// with
     /// ([`orientation_with_default_factor`](crate::orientation_with_default_factor))
     /// read from the same size, so the border's edge and the split's axis
     /// cannot disagree.
@@ -215,8 +216,8 @@ impl State {
 
     /// Returns whether `position` is on the focused sheet's command label.
     ///
-    /// The label is the border line of the focused sheet: the top row of a
-    /// vertical sheet, the right column of a horizontal one. Only the label's
+    /// The label is the border line of the focused sheet: the last row of a
+    /// vertical sheet, the last column of a horizontal one. Only the label's
     /// own part of the line is meant, but a click anywhere along the line
     /// accepts -- the border *is* the affordance, and separating the label's
     /// few cells from the rule's many would make the target smaller than the
@@ -239,7 +240,7 @@ impl State {
                 }
                 match orientation {
                     crate::Orientation::Vertical => {
-                        position.row == region.position.row
+                        position.row == region.position.row + region.size.rows - 1
                             && position.col >= region.position.col
                             && position.col < region.position.col + region.size.cols
                     }

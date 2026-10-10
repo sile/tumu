@@ -6,8 +6,8 @@
 //! grid clipped at the sheet's edge. The whole-screen frame is still the public
 //! thing, so these assert on `tumu::frame`.
 //!
-//! The border runs along the stack's axis -- the top row when the stack is
-//! vertical, the right column when it is horizontal -- so a test picks a size
+//! The border runs along the stack's axis -- the last row when the stack is
+//! vertical, the last column when it is horizontal -- so a test picks a size
 //! that stacks the way it means to assert on: a tall, narrow terminal stacks
 //! vertically, a wide, short one horizontally.
 
@@ -96,16 +96,22 @@ fn the_renderer_never_paints_outside_the_frame() {
 
 #[test]
 fn a_vertical_border_names_the_focused_sheet_with_the_label() {
-    // A tall, narrow terminal stacks vertically, so the border is the top row.
+    // A tall, narrow terminal stacks vertically, so the border is the last row.
     let state = started(24, 40);
 
     let frame = tumu::frame(&state, &());
-    let top = row_text(&frame, 0);
+    let bottom = row_text(&frame, 23);
 
     // The one sheet is focused, so its border carries the command label and
     // reads from the corner outwards, the rest of the row being rule.
-    assert!(top.starts_with("└ [C-q ...]"), "focused border was {top:?}");
-    assert!(top.contains('─'), "the rest of the border is rule: {top:?}");
+    assert!(
+        bottom.starts_with("└ [C-q ...]"),
+        "focused border was {bottom:?}"
+    );
+    assert!(
+        bottom.contains('─'),
+        "the rest of the border is rule: {bottom:?}"
+    );
 }
 
 #[test]
@@ -196,13 +202,13 @@ fn a_sheet_with_no_contents_shows_only_its_border() {
     let frame = tumu::frame(&state, &());
 
     assert!(
-        row_text(&frame, 0).starts_with("└ [C-q ...]"),
+        row_text(&frame, 23).starts_with("└ [C-q ...]"),
         "the border is the only thing drawn"
     );
-    // Composing a sheet frame paints its whole rectangle, so the rows below the
+    // Composing a sheet frame paints its whole rectangle, so the rows above the
     // border are blank cells rather than absent ones.
     assert!(
-        row_text(&frame, 1).trim().is_empty(),
+        row_text(&frame, 0).trim().is_empty(),
         "the content rows carry no text"
     );
 }
@@ -222,8 +228,8 @@ fn contents_are_painted_to_the_left_of_the_border_and_clipped_at_the_sheet_edge(
 
     // One sheet, tall enough to stack vertically while still wide enough for
     // the border's text, with a grid whose first row is longer than the sheet is
-    // wide. The border owns row 0; the grid starts at row 1 and must stop at
-    // the sheet's right edge.
+    // wide. The border owns the last row; the grid starts at row 0 and must
+    // stop at the sheet's right edge.
     const COLS: usize = 20;
     let state = started(24, COLS);
     let long: Vec<Cell> = "abcdefghijklmnopqrstuvwxyz".chars().map(cell).collect();
@@ -238,11 +244,11 @@ fn contents_are_painted_to_the_left_of_the_border_and_clipped_at_the_sheet_edge(
     let frame = tumu::frame(&state, &contents);
 
     assert!(
-        row_text(&frame, 0).starts_with("└ [C-q ...]"),
-        "the border owns row 0"
+        row_text(&frame, 23).starts_with("└ [C-q ...]"),
+        "the border owns the last row"
     );
     assert_eq!(
-        row_text(&frame, 1),
+        row_text(&frame, 0),
         "abcdefghijklmnopqrst",
         "the grid is clipped to {COLS} columns"
     );

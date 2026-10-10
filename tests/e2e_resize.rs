@@ -9,12 +9,12 @@ mod e2e;
 
 #[test]
 fn a_resize_relays_out_the_single_sheet() {
-    // Tall: the stack is vertical and the border is the top row.
+    // Tall: the stack is vertical and the border is the last row.
     let mut tumu = e2e::TumuHarness::with_size(40, 24);
     tumu.wait_for_text("└ [C-q ...]");
 
     // Rotate to a short, wide terminal: the stack flips to horizontal and the
-    // border moves to the left column, written vertically.
+    // border moves to the last column, written vertically.
     tumu.resize(12, 200);
 
     tumu.wait_for_column_text("[C-q ...]");

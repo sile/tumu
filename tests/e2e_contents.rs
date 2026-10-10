@@ -29,8 +29,8 @@ fn script(name: &str, body: &str) -> PathBuf {
 fn a_sheets_output_is_painted_into_its_content_region() {
     // The sheet runs `$SHELL -l`; a login-style script that prints a banner and
     // then waits keeps the sheet alive and its output stable. A tall terminal
-    // stacks vertically, so the border is row 0 and the banner lands on row 1 --
-    // the first content row.
+    // stacks vertically, so the border is the last row and the banner lands on
+    // row 0 -- the first content row.
     let shell = script("banner", "echo SHEET-BANNER; exec sleep 30");
     let mut tumu = e2e::TumuHarness::with_shell(40, 24, shell.to_str().expect("utf-8 path"));
 
@@ -38,23 +38,23 @@ fn a_sheets_output_is_painted_into_its_content_region() {
 }
 
 #[test]
-fn output_goes_under_the_title_not_over_it() {
-    // The border still shows on the sheet's first row even with output painted
-    // below it, and the banner is on the row after.
-    let shell = script("under", "echo CONTENT-MARK; exec sleep 30");
+fn output_goes_above_the_border_not_over_it() {
+    // The border still shows on the sheet's last row even with output painted
+    // above it, and the banner is on the row before.
+    let shell = script("above", "echo CONTENT-MARK; exec sleep 30");
     let mut tumu = e2e::TumuHarness::with_shell(40, 24, shell.to_str().expect("utf-8 path"));
 
     tumu.wait_for_text("CONTENT-MARK");
     let rows = tumu.screen_rows();
     assert!(
-        rows[0].starts_with("└ [C-q ...]"),
-        "the border must stay on row 0, got: {:?}",
-        rows[0]
+        rows[39].starts_with("└ [C-q ...]"),
+        "the border must stay on the sheet's last row, got: {:?}",
+        rows[39]
     );
     assert!(
-        rows[1].contains("CONTENT-MARK"),
+        rows[0].contains("CONTENT-MARK"),
         "the output must be on the first content row, got: {:?}",
-        rows[1]
+        rows[0]
     );
 }
 

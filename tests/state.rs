@@ -668,12 +668,12 @@ fn clicking_the_menu_border_dismisses_it() {
 
 #[test]
 fn clicking_the_focused_sheets_border_label_opens_the_menu() {
-    // A tall terminal stacks vertically, so the focused border is its top row.
+    // A tall terminal stacks vertically, so the focused border is its last row.
     let mut state = state_with(40, 30, 1);
     let region = state.region_of(0).expect("the sheet's region");
 
     state.update(tumu::Event::Mouse(click(
-        region.position.row,
+        region.position.row + region.size.rows - 1,
         region.position.col + 2,
     )));
 

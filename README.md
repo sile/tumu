@@ -22,25 +22,31 @@ Stacked sheets
 Vertically stacked:
 
 ```
-|            |            |
-|            |            |
-| sheet 1    | sheet 2    |
-|            |            |
-| $          | $          |
-|            |            |
-|------------|------------|
+|                |
+| sheet 1        |
+| $              |
+|└ [C-q ...] s1  |
+| sheet 2        |
+| $              |
+|└ s2            |
 ```
 
 Horizontally stacked:
 
 ```
-----------------|---|---|
-sheet 1         |   |   |
-                |s  |.  |
-                |2  |.  |
-                |   |.  |
-$               |$  |   |
-----------------|---|---|
+sheet 1      |   | sheet 2 |
+             |└  |   └     |
+$            |[C |   s2    |
+             | - |         |
+             | q |         |
+             | . |         |
+             | . |         |
+             | . |         |
+             | ] |         |
+             | s |         |
+             | 1 |         |
+             | ─ |         |
+             | ─ |         |
 ```
 
 - When new sheet is created, it stacked to the top of the stack.
@@ -57,7 +63,7 @@ Sheet border
 The sheets of a stack are divided by a border line: one line per sheet, along
 the stack's axis, reading from the corner outwards.
 
-Vertically stacked, the border is the sheet's **top edge** -- a corner, the
+Vertically stacked, the border is the sheet's **bottom edge** -- a corner, the
 command label (focused sheet only), the title the child last set, then rule to
 the edge:
 
@@ -70,11 +76,12 @@ Horizontally stacked, it is the sheet's **right edge**, the same text written
 *down* its column, one character per row, so it reads top to bottom the way the
 other one reads left to right.
 
-Which edge it is follows from which sheet the line divides the one at hand
-from, and that follows the axis: vertically the sheets stack down the screen, so
-a sheet's line runs along its **top** edge, dividing it from the one below;
-horizontally they stack across it, so the neighbour is the one to the **left**
-and the line runs along the **right** edge.
+Which edge it is follows from where a sheet ends along the axis: the line is the
+one a sheet closes on, so it sits on the edge the sheet advances towards.
+Vertically the sheets stack down the screen, so a sheet's line runs along its
+**bottom** edge; horizontally they stack across it, so it runs along the
+**right** edge. Either way the sheet after it in the stack starts on the far
+side of that line, and each sheet keeps its own line and its own title.
 
 The axis is not a setting, so a rotation flips the border with the layout. The
 label `[C-q ...]` is drawn only on the focused sheet, so which sheet the keyboard
