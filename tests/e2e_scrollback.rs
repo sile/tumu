@@ -1,12 +1,11 @@
 //! End-to-end test for handing the scrollback to an external editor.
 //!
-//! `prefix l` runs the editor named by `$TUMU_EDITOR` with a temporary file
-//! holding the focused sheet's scrollback as its argument. The tests point
-//! `$TUMU_EDITOR` at a small script that copies the file named by its first
-//! argument to a known path, so the text tumu produced can be read back and
-//! asserted on. The editor is a stand-in for `kk`: what is under test is that
-//! tumu collects the scrollback and hands it over as a file, not what the child
-//! is.
+//! `prefix l` runs the editor named by `$TUMU_EDITOR` with the focused sheet's
+//! scrollback on its standard input. The tests point `$TUMU_EDITOR` at a small
+//! script that copies its standard input to a known path, so the text tumu
+//! produced can be read back and asserted on. The editor is a stand-in for
+//! `kk`: what is under test is that tumu collects the scrollback and writes it
+//! to the child's standard input, not what the child is.
 
 mod e2e;
 
@@ -33,14 +32,11 @@ fn the_prefix_l_hand_off_sends_the_sheet_output_to_the_editor() {
     // The sheet prints a marker and then waits, so its output stays on screen
     // while the scrollback is collected.
     let shell = script("scrollback-shell", "echo SHEET-HELLO; exec sleep 30");
-    // The editor copies the file tumu names to the output file. It is handed
-    // the file path as its last argument, after the `--tail` flag, which is
-    // what `kk --tail <path>` would open.
+    // The editor copies everything on its standard input to the output file.
+    // It ignores its own argv (`--tail`): what matters is the pipe tumu fills,
+    // which is what `kk --tail` reads.
     let out = out_path("handoff");
-    let editor = script(
-        "scrollback-editor",
-        &format!("cat \"$2\" > {}", out.display()),
-    );
+    let editor = script("scrollback-editor", &format!("cat > {}", out.display()));
 
     let mut tumu = e2e::TumuHarness::with_shell_and_editor(
         40,
