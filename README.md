@@ -137,6 +137,44 @@ The editor program is fixed to `kk` by default and can be changed with
 `$TUMU_EDITOR`; it is always launched as `<program> --tail`, so the program
 must accept `--tail` and read its text from standard input.
 
+### Future: an embedded editor (memo)
+
+The external-editor handoff above is a stopgap. Launching a child and giving it
+the whole terminal means the editor is always full screen, whatever region the
+focused sheet actually had: a sheet split off from the stack still opens the
+editor over the whole display. The handover is also the one place tumu gives the
+terminal up and takes it back, which is why the frame has to be repainted from
+scratch afterwards.
+
+Both go away if `kk` is used as a *library* instead of as a child process, which
+its design already allows: `kk`'s core is Sans I/O, so `State` plus the
+`render_*` functions paint a `tuinix::Frame` directly, and tumu is already
+building one frame per sheet. An embedded copy mode would:
+
+- build a `kk::State` over the focused sheet's scrollback text (`kk::TextBuffer`
+  over the same rows `scrollback_text` collects today),
+- route keys and mouse to it while it is open (`kk::Mode::resolve` -> the
+  matching `State::handle_*`), and
+- paint it into a `tuinix::Frame` the size of the sheet's *content* region and
+  `put_frame` that into tumu's frame, the same way `kk`'s own edge composes its
+  sub-frames.
+
+Then the editor shares the sheet's region exactly -- full screen when the sheet
+is, a pane of the stack when it is not -- with no terminal handover, no
+`tuinix::TerminalDriver` drop/rebuild, and no from-scratch repaint. `C-q` would
+end copy mode, as it already quits `kk`, and it is not tumu's prefix.
+
+What is missing is not the library, which already works, but an API shaped for
+embedding. `kk`'s edge (`kk::app`) currently owns the pieces an embedder needs
+but cannot reach: the order the renderers are called in, the region maths, the
+legend/cursor arbitration, `State::adjust_viewport`, and the key-to-`Action`
+dispatch. Pulling those down into `kk::State` -- roughly a `render(&mut self,
+&mut tuinix::Frame, ..)` that draws a whole view and an `handle_input(&mut self,
+&tuinix::Input, &mut Mode)` that returns "continue or quit" -- would let tumu
+embed `kk` cleanly, and would leave `kk`'s own edge as a thin caller of the very
+same methods. That is a small change to `kk` in cooperation with it, not a
+rewrite, and it is deferred for now.
+
 Menu
 ----
 
