@@ -578,8 +578,8 @@ fn clicking_a_stacked_sheet_uses_the_derived_layout() {
     let top = state.stack.sheets()[0].0;
     let bottom = state.stack.sheets()[1].0;
 
-    // The first two rows are a title and a line of the top sheet's content;
-    // the bottom half belongs to the sheet below.
+    // The border is the top sheet's first row, and the row below it is already
+    // its content; the bottom half belongs to the sheet below.
     state.update(tumu::Event::Mouse(click(30, 5)));
     assert_eq!(state.focused, Some(bottom));
 
@@ -678,6 +678,25 @@ fn clicking_the_focused_sheets_border_label_opens_the_menu() {
     )));
 
     assert!(state.menu, "a click on the label opens the menu");
+}
+
+#[test]
+fn clicking_the_focused_sheets_border_opens_the_menu_when_horizontal() {
+    // A wide terminal stacks horizontally, so the border is the sheet's own
+    // *last* column -- the edge it shares with nothing, because the neighbour is
+    // the sheet to its left.
+    let mut state = state_with(24, 80, 1);
+    let region = state.region_of(0).expect("the sheet's region");
+    let border_col = region.position.col + region.size.cols - 1;
+
+    state.update(tumu::Event::Mouse(click(5, border_col)));
+    assert!(state.menu, "a click on the border opens the menu");
+
+    // A click one column to its left is content, not border.
+    state.update(tumu::Event::Mouse(click(5, border_col - 1)));
+    // The menu was open, so that click dismisses it; the point is that it did
+    // not land on the border and re-open it.
+    assert!(!state.menu);
 }
 
 #[test]

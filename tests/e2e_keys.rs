@@ -8,8 +8,10 @@
 //! where focus is.
 //!
 //! The default 24x80 is wider than tall, so the stack lays out *horizontally*
-//! and each sheet's border runs down its left column. The border text is
+//! and each sheet's border runs down its right column. The border text is
 //! therefore read column by column (`wait_for_column_text`), not row by row.
+//! A sheet's border column is its own last column, so the top sheet's is at
+//! column 39 and the sheet below it at column 79.
 //!
 //! Every test pins `$SHELL` to a silent script, so a sheet's border shows only
 //! tumu's own text. A real login shell sets a window title of its own (fish
@@ -50,16 +52,16 @@ fn a_new_sheet_stacks_on_top() {
     tumu.send_prefix();
     tumu.send_char('n');
 
-    // Two sheets: the label moves to the new top sheet (column 0) and the sheet
-    // that was 0 loses it. Both borders repaint in one frame, so wait for both
-    // rather than read a frame that may still hold the previous one.
+    // Two sheets: the label moves to the new top sheet (column 39) and the
+    // sheet that was 0 loses it. Both borders repaint in one frame, so wait for
+    // both rather than read a frame that may still hold the previous one.
     tumu.wait_until("two sheet borders", |h| {
-        h.screen_column(0).starts_with("└ [C-q ...]") && h.screen_column(40).starts_with("└")
+        h.screen_column(39).starts_with("└ [C-q ...]") && h.screen_column(79).starts_with("└")
     });
     assert!(
-        !tumu.screen_column(40).contains("[C-q ...]"),
+        !tumu.screen_column(79).contains("[C-q ...]"),
         "only the focused sheet shows the label: {}",
-        tumu.screen_column(40)
+        tumu.screen_column(79)
     );
 }
 
@@ -70,18 +72,23 @@ fn closing_the_focused_sheet_grows_the_rest() {
     tumu.send_prefix();
     tumu.send_char('n');
     tumu.wait_until("two sheet borders", |h| {
-        h.screen_column(0).starts_with("└ [C-q ...]") && h.screen_column(40).starts_with("└")
+        h.screen_column(39).starts_with("└ [C-q ...]") && h.screen_column(79).starts_with("└")
     });
 
     // Close the focused sheet: the one on top.
     tumu.send_prefix();
     tumu.send_char('x');
 
-    // Back to one sheet filling the terminal: only the left border is left, and
-    // it is the focused one.
+    // Back to one sheet filling the terminal, so its border is now the screen's
+    // *last* column (79) and the column it used to end at (39) is content.
     tumu.wait_until("one sheet border", |h| {
-        h.screen_column(0).starts_with("└ [C-q ...]") && h.screen_column(40).trim().is_empty()
+        h.screen_column(79).starts_with("└ [C-q ...]")
     });
+    assert!(
+        tumu.screen_column(39).chars().all(|c| !"└─".contains(c)),
+        "the closed sheet's border column is gone: {:?}",
+        tumu.screen_column(39)
+    );
 }
 
 #[test]
@@ -91,7 +98,7 @@ fn the_rotate_command_brings_the_stack_up_under_the_keyboard() {
     tumu.send_prefix();
     tumu.send_char('n');
     tumu.wait_until("two sheet borders", |h| {
-        h.screen_column(0).starts_with("└ [C-q ...]") && h.screen_column(40).starts_with("└")
+        h.screen_column(39).starts_with("└ [C-q ...]") && h.screen_column(79).starts_with("└")
     });
 
     tumu.send_prefix();
@@ -99,14 +106,14 @@ fn the_rotate_command_brings_the_stack_up_under_the_keyboard() {
 
     // Rotating moves the top sheet to the bottom, so the sheet that was at
     // index 1 comes up to index 0 and takes the focus with it. Focus is on the
-    // sheet that came to the *top*, so the label stays in column 0: what moved
+    // sheet that came to the *top*, so the label stays in column 39: what moved
     // is which sheet wears it, which the frame alone does not show. The layout
     // is unchanged -- two 40-column sheets -- so the observable result is that
     // the label is still exactly once, on the top sheet.
     tumu.wait_until("the label is back on the top sheet", |h| {
-        h.screen_column(0).starts_with("└ [C-q ...]") && h.screen_column(40).starts_with("└─")
+        h.screen_column(39).starts_with("└ [C-q ...]") && h.screen_column(79).starts_with("└─")
     });
-    assert!(!tumu.screen_column(40).contains("[C-q ...]"));
+    assert!(!tumu.screen_column(79).contains("[C-q ...]"));
 }
 
 #[test]
@@ -116,16 +123,18 @@ fn the_full_screen_command_fills_the_terminal_and_folds_back() {
     tumu.send_prefix();
     tumu.send_char('n');
     tumu.wait_until("two sheet borders", |h| {
-        h.screen_column(0).starts_with("└ [C-q ...]") && h.screen_column(40).starts_with("└")
+        h.screen_column(39).starts_with("└ [C-q ...]") && h.screen_column(79).starts_with("└")
     });
 
     tumu.send_prefix();
     tumu.send_char('z');
 
-    // The focused sheet takes the whole terminal; the other is hidden, so its
-    // border at column 40 is gone.
+    // The focused sheet takes the whole terminal; the other is hidden, so the
+    // border it used to show (at column 39) is gone and the focused sheet's
+    // border is the screen's last column.
     tumu.wait_until("the hidden sheet's border is gone", |h| {
-        h.screen_column(0).starts_with("└ [C-q ...]") && h.screen_column(40).trim().is_empty()
+        h.screen_column(79).starts_with("└ [C-q ...]")
+            && h.screen_column(39).chars().all(|c| !"└─".contains(c))
     });
 
     tumu.send_prefix();
@@ -133,7 +142,7 @@ fn the_full_screen_command_fills_the_terminal_and_folds_back() {
 
     // Folding back restores both, with focus where it was.
     tumu.wait_until("both sheet borders return", |h| {
-        h.screen_column(0).starts_with("└ [C-q ...]") && h.screen_column(40).starts_with("└")
+        h.screen_column(39).starts_with("└ [C-q ...]") && h.screen_column(79).starts_with("└")
     });
 }
 

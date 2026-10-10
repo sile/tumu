@@ -6,7 +6,8 @@
 //! focus" is an assertion about the frame, not about the core's internals.
 //!
 //! The default 24x80 is wider than tall, so two sheets split the columns 40/40
-//! and each border runs down its left column; focus is read from those columns.
+//! and each border runs down its right column: the upper sheet's at column 39,
+//! the lower one's at column 79. Focus is read from those columns.
 //!
 //! The reports go through `termnix`, which only encodes one when the child has
 //! asked for mouse reporting; that `tumu` has (see `App::new`) is part of what
@@ -28,14 +29,14 @@ const LOWER_SHEET_COL: u16 = 60;
 /// The column inside the upper sheet of a 80-column terminal.
 const UPPER_SHEET_COL: u16 = 10;
 
-/// The left column of the upper sheet, where its border is written.
-const UPPER_BORDER_COL: u16 = 0;
+/// The last column of the upper sheet, where its border is written.
+const UPPER_BORDER_COL: u16 = 39;
 
-/// The left column of the lower sheet, where its border is written.
-const LOWER_BORDER_COL: u16 = 40;
+/// The last column of the lower sheet, where its border is written.
+const LOWER_BORDER_COL: u16 = 79;
 
 /// Waits until the two sheets are laid out and one of their borders carries the
-/// focus label. `focused_column` is 0 for the upper sheet, 40 for the lower.
+/// focus label. `focused_column` is 39 for the upper sheet, 79 for the lower.
 fn wait_for_focus(tumu: &mut e2e::TumuHarness, upper_focused: bool) {
     let (focused, other) = if upper_focused {
         (UPPER_BORDER_COL, LOWER_BORDER_COL)
@@ -126,10 +127,11 @@ fn the_keyboard_follows_a_click() {
     tumu.send_prefix();
     tumu.send_char('x');
 
-    // One sheet is left, focused, filling the terminal, with no border in the
-    // lower sheet's old column.
+    // One sheet is left, focused, filling the terminal. Its border is now the
+    // screen's last column (79), and the column the closed sheet's border used
+    // to be in (39) is content, so no border char is left there.
     tumu.wait_until("the lower sheet is gone", |h| {
-        h.screen_column(UPPER_BORDER_COL).starts_with("└ [C-q ...]")
-            && h.screen_column(LOWER_BORDER_COL).trim().is_empty()
+        h.screen_column(79).starts_with("└ [C-q ...]")
+            && h.screen_column(39).chars().all(|c| !"└─".contains(c))
     });
 }

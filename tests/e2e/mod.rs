@@ -169,7 +169,7 @@ impl TumuHarness {
 
     /// Reads one column of the screen back as a string, top to bottom.
     ///
-    /// A horizontal stack writes each sheet's border *down* its left column, so
+    /// A horizontal stack writes each sheet's border *down* its right column, so
     /// the border text is not on any one row: this is how a test reads it.
     pub fn screen_column(&self, col: u16) -> String {
         let state = self.session.terminal_state();

@@ -7,7 +7,7 @@
 //! thing, so these assert on `tumu::frame`.
 //!
 //! The border runs along the stack's axis -- the top row when the stack is
-//! vertical, the left column when it is horizontal -- so a test picks a size
+//! vertical, the right column when it is horizontal -- so a test picks a size
 //! that stacks the way it means to assert on: a tall, narrow terminal stacks
 //! vertically, a wide, short one horizontally.
 
@@ -127,26 +127,31 @@ fn an_unfocused_border_has_no_label() {
 }
 
 #[test]
-fn a_horizontal_border_is_written_vertically_in_the_left_column() {
-    // A wide, short terminal stacks horizontally, so the border is the left
-    // column, the text read top to bottom.
+fn a_horizontal_border_is_written_vertically_in_the_last_column() {
+    // A wide, short terminal stacks horizontally, so the border is the last
+    // column of the sheet, the text read top to bottom.
     let state = started(24, 80);
 
     let frame = tumu::frame(&state, &());
-    let left = col_text(&frame, 0);
+    let right = col_text(&frame, 79);
 
     assert!(
-        left.starts_with("└ [C-q ...]"),
-        "the left column holds the border written vertically: {left:?}"
+        right.starts_with("└ [C-q ...]"),
+        "the last column holds the border written vertically: {right:?}"
+    );
+    assert!(
+        col_text(&frame, 0).trim().is_empty(),
+        "the sheet's first column is content, not border"
     );
 }
 
 #[test]
 fn a_narrow_sheet_does_not_leak_its_border_onto_its_neighbour() {
-    // Two sheets side by side (`80x24` stacks horizontally), each 40 columns,
-    // so the sheet at index 1 owns columns 40..80. It sets a title longer than
-    // 40 columns: the border must be clipped at its own left edge (column 40)
-    // and leave the sheet at columns 0..40 -- the other one -- untouched.
+    // Two sheets side by side (`24x80` stacks horizontally), each 40 columns,
+    // so the sheet at index 1 owns columns 40..80. The border is the sheet's
+    // last column, so index 1's is column 79 and index 0's is column 39. The
+    // focused sheet (index 1) sets a title longer than 40 rows: the border must
+    // be clipped at its own bottom edge and leave sheet 0 alone.
     let mut state = started(24, 80);
     state.stack.push_top();
     state.update(tumu::Event::TitleChanged {
@@ -156,20 +161,21 @@ fn a_narrow_sheet_does_not_leak_its_border_onto_its_neighbour() {
 
     let frame = tumu::frame(&state, &());
 
-    // The focused sheet (index 1, focused before the push) owns column 40 and
-    // carries the label; its overflowing `T`s must stop at its own left edge and
-    // leave sheet 0 (column 0) untouched.
-    let neighbour = col_text(&frame, 0);
+    // Sheet 0 (columns 0..40) is unfocused: its own last column is a bare
+    // corner and rule, with no label and no leaked `T`.
+    let neighbour = col_text(&frame, 39);
     assert_eq!(
         neighbour,
         format!("└{}", "─".repeat(23)),
         "sheet 0 is unfocused: a bare corner and rule, no label and no leak"
     );
-    let focused_col = col_text(&frame, 40);
+    let focused_col = col_text(&frame, 79);
     assert!(
         focused_col.starts_with("└ [C-q ...] T"),
         "the focused border and its title survive in its own column: {focused_col:?}"
     );
+    // The title is clipped at the focused sheet's own bottom edge, so no `T`
+    // appears anywhere in the other sheet's columns.
     let leaked = frame
         .chars()
         .filter(|(position, ch)| ch.value() == 'T' && position.col < 40)
@@ -202,7 +208,7 @@ fn a_sheet_with_no_contents_shows_only_its_border() {
 }
 
 #[test]
-fn contents_are_painted_below_the_title_and_clipped_at_the_sheet_edge() {
+fn contents_are_painted_to_the_left_of_the_border_and_clipped_at_the_sheet_edge() {
     use termnix::{Cell, Style};
 
     /// Builds a single-width cell holding `ch`.

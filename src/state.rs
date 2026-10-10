@@ -216,10 +216,11 @@ impl State {
     /// Returns whether `position` is on the focused sheet's command label.
     ///
     /// The label is the border line of the focused sheet: the top row of a
-    /// vertical sheet, the left column of a horizontal one. Only the label's own
-    /// part of the line is meant, but a click anywhere along the line accepts --
-    /// the border *is* the affordance, and separating the label's few cells from
-    /// the rule's many would make the target smaller than the thing drawn.
+    /// vertical sheet, the right column of a horizontal one. Only the label's
+    /// own part of the line is meant, but a click anywhere along the line
+    /// accepts -- the border *is* the affordance, and separating the label's
+    /// few cells from the rule's many would make the target smaller than the
+    /// thing drawn.
     ///
     /// A hidden sheet (full screen elsewhere) has an empty region, and a stack
     /// with no focus has no label, so neither can be clicked.
@@ -243,7 +244,7 @@ impl State {
                             && position.col < region.position.col + region.size.cols
                     }
                     crate::Orientation::Horizontal => {
-                        position.col == region.position.col
+                        position.col == region.position.col + region.size.cols - 1
                             && position.row >= region.position.row
                             && position.row < region.position.row + region.size.rows
                     }

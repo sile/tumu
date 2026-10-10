@@ -66,14 +66,19 @@ focused:  └ [C-q ...] TITLE ───────
 others:   └ TITLE ─────────────────
 ```
 
-Horizontally stacked, it is the sheet's **left edge**, the same text written
+Horizontally stacked, it is the sheet's **right edge**, the same text written
 *down* its column, one character per row, so it reads top to bottom the way the
 other one reads left to right.
 
-Which edge it is follows the terminal's shape, not a setting, so a rotation
-flips the border along with the layout. The label `[C-q ...]` is drawn only on
-the focused sheet, so which sheet the keyboard is aimed at is visible in the
-frame alone.
+Which edge it is follows from which sheet the line divides the one at hand
+from, and that follows the axis: vertically the sheets stack down the screen, so
+a sheet's line runs along its **top** edge, dividing it from the one below;
+horizontally they stack across it, so the neighbour is the one to the **left**
+and the line runs along the **right** edge.
+
+The axis is not a setting, so a rotation flips the border with the layout. The
+label `[C-q ...]` is drawn only on the focused sheet, so which sheet the keyboard
+is aimed at is visible in the frame alone.
 
 Keys
 ----

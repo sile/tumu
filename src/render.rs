@@ -139,17 +139,22 @@ fn convert_color(color: Option<termnix::Color>) -> Option<tuinix::Color> {
 
 /// Returns the size of a sheet's content when the sheet is `size`.
 ///
-/// The border takes one line off the sheet along the stack's axis: the top row
-/// when the stack runs vertically, the left column when it runs horizontally.
-/// The rest is the content. A sheet one cell long on that axis therefore has no
-/// content cells, which is how a collapsed sheet is drawn: its single line is
-/// the border alone.
+/// The border takes one line off the sheet along the stack's axis: one of the
+/// rows when the stack runs vertically, one of the columns when it runs
+/// horizontally. The rest is the content. A sheet one cell long on that axis
+/// therefore has no content cells, which is how a collapsed sheet is drawn: its
+/// single line is the border alone.
+///
+/// Which line it is follows the axis, and which *side* of the sheet it sits on
+/// follows the axis too: the border divides a sheet from the one below it or the
+/// one to its right, so it is the top row of a vertical sheet and the last
+/// column of a horizontal one (see [`sheet_content_origin`]).
 ///
 /// The result is a size, not a region, because inside a sheet the content's
-/// top-left corner is always one cell along the axis: `(1, 0)` vertically,
-/// `(0, 1)` horizontally. The sheet's own frame starts at `(0, 0)` and the
-/// screen position of the sheet is applied when the sheet is composed into the
-/// screen, not when it is drawn.
+/// top-left corner is always the sheet's own `(0, 0)`: the content is drawn
+/// from there and the border is placed around it, so the sheet's own frame never
+/// moves. The screen position of the sheet is applied when the sheet is composed
+/// into the screen, not when it is drawn.
 pub fn sheet_content_size(size: tuinix::Size, orientation: crate::Orientation) -> tuinix::Size {
     match orientation {
         crate::Orientation::Vertical => tuinix::Size {
@@ -165,12 +170,20 @@ pub fn sheet_content_size(size: tuinix::Size, orientation: crate::Orientation) -
 
 /// Returns where a sheet's content starts inside the sheet's own frame.
 ///
-/// One cell along the stack's axis, past the border: down one row when the
-/// stack runs vertically, right one column when it runs horizontally.
+/// The border sits on the edge that divides the sheet from its neighbour along
+/// the axis: the **top** row when the stack runs vertically, because the sheet
+/// below it is the one the line is drawn for, and the **right** column when it
+/// runs horizontally, for the sheet to its left. The content therefore starts
+/// one cell in from the opposite edge -- down one row vertically, and at the
+/// sheet's own left edge horizontally, which is the origin itself.
+///
+/// That is what keeps a sheet's content at its own `(0, 0)`: the frame is built
+/// at the content's corner and the border is placed around it, so flipping the
+/// axis moves the border, not the grid.
 pub fn sheet_content_origin(orientation: crate::Orientation) -> tuinix::Position {
     match orientation {
         crate::Orientation::Vertical => tuinix::Position { row: 1, col: 0 },
-        crate::Orientation::Horizontal => tuinix::Position { row: 0, col: 1 },
+        crate::Orientation::Horizontal => tuinix::Position::ORIGIN,
     }
 }
 
@@ -251,22 +264,29 @@ fn border_label() -> String {
 /// Draws one sheet's border into a fresh frame of size `size`.
 ///
 /// The border is a single line along the stack's axis -- the top row when the
-/// stack is vertical, the left column when it is horizontal -- that reads, from
+/// stack is vertical, the right column when it is horizontal -- that reads, from
 /// the corner outwards: a corner (`└`), the command label (only on the focused
 /// sheet), the title the child set (if any); the rest of the line up to the
 /// sheet's edge is rule (`─`). The corner and the rule are what make the sheet
 /// read as a sheet -- a line the stack is divided by -- and the label and the
 /// title are what distinguish one from another.
 ///
-/// When the stack is horizontal the same text is written *down the column*, one
-/// character per row, so the border reads top to bottom in a left edge the same
-/// way it reads left to right in a top edge.
+/// The border divides a sheet from its neighbour along the axis, so it sits on
+/// the edge nearest that neighbour: vertically both sheets span the width and
+/// the one below is the one the line separates off, so it is the **top** row;
+/// horizontally the stack runs the other way, so the neighbour is the one to the
+/// **left** and the line is the **right** column. The corner therefore reads at
+/// the end of the line the sheets advance towards.
 ///
-/// The frame is the sheet's own, so its far edge is the sheet's far edge: a
-/// border that would cross it is clipped here and cannot reach a neighbour. A
-/// title is the child's, so it may hold any character at all; in a vertical
-/// stack its width is measured rather than assumed (see [`push_str()`] below),
-/// while a horizontal border is one cell per character by construction.
+/// When the stack is horizontal the same text is written *down the column*, one
+/// character per row, so the border reads top to bottom the way it reads left to
+/// right in a top edge.
+///
+/// The frame is the sheet's own, so a border that would cross its far edge is
+/// clipped here and cannot reach a neighbour. A title is the child's, so it may
+/// hold any character at all; in a vertical stack its width is measured rather
+/// than assumed (see [`push_str()`] below), while a horizontal border is one
+/// cell per character by construction.
 pub fn sheet_frame(
     sheet: &crate::Sheet,
     size: tuinix::Size,
@@ -305,9 +325,10 @@ pub fn sheet_frame(
             }
         }
         crate::Orientation::Horizontal => {
-            // The border is the left column; the text runs top to bottom, one
-            // character per row, so a line longer than the sheet is clipped at
-            // the bottom edge just as a vertical one is at the right edge.
+            // The border is the right column and reads downwards, one character
+            // per row, so a line longer than the sheet is clipped at the bottom
+            // edge just as a vertical one is at the right edge.
+            let col = size.cols.saturating_sub(1);
             let bottom = size.rows;
             let mut row = 0;
             for ch in line.chars() {
@@ -317,14 +338,14 @@ pub fn sheet_frame(
                 let Some(cell) = tuinix::Char::new(ch, 1, tuinix::Style::RESET) else {
                     continue;
                 };
-                frame.put_char(tuinix::Position { row, col: 0 }, cell);
+                frame.put_char(tuinix::Position { row, col }, cell);
                 row += 1;
             }
             while row < bottom {
                 let Some(cell) = tuinix::Char::new(BORDER_RULE, 1, tuinix::Style::RESET) else {
                     break;
                 };
-                frame.put_char(tuinix::Position { row, col: 0 }, cell);
+                frame.put_char(tuinix::Position { row, col }, cell);
                 row += 1;
             }
         }

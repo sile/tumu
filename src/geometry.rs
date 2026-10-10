@@ -46,7 +46,8 @@ pub fn terminal_region(size: tuinix::Size) -> tuinix::Region {
 /// giving the leading part `share` cells.
 ///
 /// Verically, `share` rows go to the first region and the rest to the second;
-/// horizontally, `share` columns go to the first and the rest to the second. In
+/// horizontally, `share` columns go to the first and the rest to the second,
+/// so the second region is the *right* one. In
 /// either case the two sizes sum to the original along the axis, and the split
 /// is clamped so neither part is empty: a split that would leave a side with no
 /// cells keeps one cell for it and gives the rest to the other. A region one
