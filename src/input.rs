@@ -106,6 +106,11 @@ pub const BINDINGS: &[Binding] = &[
         label: "edit scrollback",
     },
     Binding {
+        key: chord('y'),
+        command: Command::PasteClipboard,
+        label: "paste clipboard",
+    },
+    Binding {
         key: chord('q'),
         command: Command::Quit,
         label: "quit",

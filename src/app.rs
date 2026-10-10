@@ -12,6 +12,11 @@
 //! [`Event::Mouse`](tumu::Event::Mouse), which is how a click moves focus. Paste
 //! and undecodable input are drained but not yet acted on.
 //!
+//! The edge also owns the clipboard. A child's OSC 52 copy arrives as
+//! [`termnix::Event::RequestReceived`] with a `SetClipboard`; the edge forwards
+//! the text to the host terminal and remembers it, and `prefix y` sends the
+//! remembered bytes back to a sheet as [`termnix::Input::Paste`].
+//!
 //! One command leaves the loop for a moment: `prefix l` hands the focused
 //! sheet's scrollback to an external editor. That is the one place the edge
 //! gives the terminal up and takes it back, so the handover -- dropping the
@@ -166,6 +171,15 @@ pub struct App {
     state: tumu::State,
     sessions: HashMap<tumu::TermnixSessionId, termnix::Session>,
     next_session_id: std::num::NonZeroU64,
+    /// The last text a sheet copied with OSC 52, kept so `prefix y` has
+    /// something to paste back.
+    ///
+    /// The host terminal owns the real clipboard, and OSC 52 has no read that
+    /// reliably answers, so the edge mirrors what it forwarded to the host here.
+    /// It is the last copy, not a merged history: a paste puts back what was
+    /// most recently copied. It is empty until a child asks to copy, which is
+    /// when a paste has nothing to do.
+    clipboard: Option<Vec<u8>>,
     dirty: bool,
     exit: bool,
 }
@@ -187,6 +201,7 @@ impl App {
             state,
             sessions: HashMap::new(),
             next_session_id: std::num::NonZeroU64::MIN,
+            clipboard: None,
             dirty: true,
             exit: false,
         };
@@ -263,15 +278,25 @@ impl App {
             // the visible grid may have moved, which is what dirties a sheet.
             // `TitleUpdated` is the one other event the frame reacts to: the
             // title is shown in the sheet's title row, so it is read off the
-            // session and handed to the core. The remaining events (a
-            // retained line, a request, a hyperlink) do not change what this
-            // frame shows, so they are dropped for now.
+            // session and handed to the core. A clipboard write
+            // (`RequestReceived` with `SetClipboard`) is acted on here too:
+            // the text is forwarded to the host clipboard and remembered for
+            // `prefix y`. The remaining events (a retained line, a hyperlink,
+            // the other requests) do not change what this frame shows, so they
+            // are dropped for now.
             //
             // The title is copied out while the session is borrowed and the
             // borrow is released before `state.update` runs: the core has no
             // access to `self.sessions`, and the borrow of `session` would
             // otherwise cover the call.
+            //
+            // A clipboard write is handled the same way for a different reason:
+            // carrying it out touches `self.driver` and `self.clipboard`, both
+            // of which would clash with the borrow of `session`. The last write
+            // in this drain wins, since each one replaces the clipboard rather
+            // than appending to it.
             let mut title: Option<String> = None;
+            let mut clipboard: Option<Vec<u8>> = None;
             while let Some(event) = session.dequeue_event() {
                 match event {
                     termnix::Event::ScreenUpdated | termnix::Event::TerminalReset => {
@@ -283,8 +308,23 @@ impl App {
                     termnix::Event::TitleUpdated => {
                         title = Some(session.terminal_state().title().to_owned());
                     }
+                    // OSC 52: the child asked the terminal to change a
+                    // selection. termnix owns no clipboard, so it is the edge
+                    // that forwards the text to the host terminal and keeps a
+                    // copy for `prefix y`. `append` and `selection` are not
+                    // acted on -- this PoC mirrors the last write into the one
+                    // host clipboard -- so only the payload is taken.
+                    termnix::Event::RequestReceived(termnix::ChildRequest::SetClipboard {
+                        text,
+                        ..
+                    }) => {
+                        clipboard = Some(text);
+                    }
                     _ => {}
                 }
+            }
+            if let Some(text) = clipboard {
+                self.set_clipboard(&text);
             }
             if let Some(title) = title
                 && let Some(index) = self.index_for_session(id)
@@ -532,6 +572,7 @@ impl App {
                 tumu::Action::CloseSession { index } => self.close_session(index),
                 tumu::Action::SendToFocused { index, key } => self.send_to_focused(index, key),
                 tumu::Action::EditScrollback { index } => self.edit_scrollback(index)?,
+                tumu::Action::PasteClipboard { index } => self.paste_clipboard(index),
                 tumu::Action::PrefixPending => {}
                 tumu::Action::Exit => self.exit = true,
             }
@@ -588,6 +629,51 @@ impl App {
         // batch were already pulled out of the input buffer, so there is no
         // later read whose readiness would flush them; without this the child
         // would sit on the byte until something else woke the loop.
+        let _ = session.pump_io(termnix::PumpBudget::default());
+    }
+
+    /// Forwards a copied text to the host terminal's clipboard and remembers it.
+    ///
+    /// The bytes came from the child's OSC 52 and are not required to be valid
+    /// UTF-8, but the host write takes a `&str`; a copy is expected to be text,
+    /// so a non-UTF-8 payload is lossily decoded rather than dropped. The host
+    /// write is best-effort -- OSC 52 has no reply -- so a terminal that ignores
+    /// it, or has none behind it, is indistinguishable from one that accepts it;
+    /// the failure is swallowed. The remembered copy is the raw bytes, so
+    /// `prefix y` pastes back exactly what the child asked to copy, whatever the
+    /// host made of it.
+    fn set_clipboard(&mut self, text: &[u8]) {
+        let lossy = String::from_utf8_lossy(text);
+        // The driver is present except while an editor owns the terminal, and an
+        // editor is only launched from a key the loop is not in the middle of
+        // draining, so the driver is here to take the write.
+        let _ = self.driver_mut().set_clipboard(&lossy);
+        self.clipboard = Some(text.to_vec());
+    }
+
+    /// Pastes the remembered clipboard into the session of the sheet at `index`.
+    ///
+    /// The bytes are enqueued as [`termnix::Input::Paste`], so `termnix` wraps
+    /// them in the bracketed-paste markers exactly when the child asked for
+    /// them. Nothing is pasted when no child has copied yet: there is no
+    /// clipboard to put back. A sheet with no session has nowhere to receive the
+    /// paste, so it is left alone.
+    fn paste_clipboard(&mut self, index: usize) {
+        let Some(text) = self.clipboard.clone() else {
+            return;
+        };
+        let Some(id) = self.session_at(index) else {
+            return;
+        };
+        let Some(session) = self.sessions.get_mut(&id) else {
+            return;
+        };
+        if session.enqueue_input(termnix::Input::Paste(&text)).is_ok() {
+            self.dirty = true;
+        }
+        // Flush the paste now, for the same reason a forwarded key is: the
+        // bytes were pulled out of the input buffer by the key that named this
+        // action, and no later read's readiness would push them out.
         let _ = session.pump_io(termnix::PumpBudget::default());
     }
 

@@ -231,6 +231,57 @@ fn editing_the_scrollback_on_an_empty_stack_does_nothing() {
 }
 
 #[test]
+fn the_paste_clipboard_command_names_the_focused_sheet() {
+    let mut state = state_with(24, 80, 2);
+
+    let actions = run_command(&mut state, 'y');
+
+    // The core names the sheet and stops: the clipboard belongs to the host
+    // terminal, which only the edge holds, so the action carries an index and
+    // not the bytes.
+    assert_eq!(actions, vec![tumu::Action::PasteClipboard { index: 0 }]);
+}
+
+#[test]
+fn pasting_the_clipboard_leaves_the_stack_alone() {
+    let mut state = state_with(24, 80, 2);
+    let before: Vec<tumu::SheetId> = state.stack.sheets().iter().map(|(id, _)| *id).collect();
+    let focused = state.focused;
+
+    run_command(&mut state, 'y');
+
+    // Pasting is not a view of tumu's own: nothing on the stack moved, focus
+    // stayed put, and the loop is not asked to stop.
+    let after: Vec<tumu::SheetId> = state.stack.sheets().iter().map(|(id, _)| *id).collect();
+    assert_eq!(after, before);
+    assert_eq!(state.focused, focused);
+    assert!(!state.full_screen);
+    assert!(!state.exit);
+}
+
+#[test]
+fn pasting_the_clipboard_follows_focus() {
+    let mut state = state_with(24, 80, 3);
+    // Focus the bottom sheet, so the index named is not the top of the stack.
+    let bottom = state.stack.sheets()[2].0;
+    state.focused = Some(bottom);
+
+    let actions = run_command(&mut state, 'y');
+
+    assert_eq!(actions, vec![tumu::Action::PasteClipboard { index: 2 }]);
+}
+
+#[test]
+fn pasting_the_clipboard_on_an_empty_stack_does_nothing() {
+    let mut state = state_with(24, 80, 1);
+    run_command(&mut state, 'x');
+
+    let actions = run_command(&mut state, 'y');
+
+    assert!(actions.is_empty());
+}
+
+#[test]
 fn a_forwarded_key_is_dropped_when_there_is_no_sheet() {
     let mut state = tumu::State::new(size(24, 80));
 

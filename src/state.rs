@@ -335,6 +335,7 @@ impl State {
             Command::RotateSheets => self.handle_rotate_sheets(),
             Command::ToggleFullScreen => self.handle_toggle_full_screen(),
             Command::EditScrollback => self.handle_edit_scrollback(),
+            Command::PasteClipboard => self.handle_paste_clipboard(),
             Command::Quit => {
                 self.exit = true;
                 vec![Action::Exit]
@@ -410,6 +411,24 @@ impl State {
             return Vec::new();
         };
         vec![Action::EditScrollback { index }]
+    }
+
+    /// Asks the edge to paste the host clipboard into the focused sheet.
+    ///
+    /// The core names the sheet and stops there: the clipboard belongs to the
+    /// host terminal, which the core does not hold, so the edge reads it and
+    /// enqueues it as input. Focus is resolved here, as for every other action,
+    /// so a rotation moves the keyboard *and* where a later `prefix y` pastes
+    /// together.
+    ///
+    /// Nothing in the state changes: pasting is not a view of tumu's own, so
+    /// the stack, the focus, and the full-screen flag are left as they were. An
+    /// empty stack has nowhere to paste, so it is a no-op.
+    fn handle_paste_clipboard(&mut self) -> Vec<Action> {
+        let Some(index) = self.focused_index() else {
+            return Vec::new();
+        };
+        vec![Action::PasteClipboard { index }]
     }
 
     /// Flips full screen and resizes every sheet to match the new layout.

@@ -101,6 +101,7 @@ tmux's own prefix. It returns to `c-o` later; the key is written in one place
 - `prefix o` -- move the focused sheet to the bottom
 - `prefix z` -- show the focused sheet full screen, and back
 - `prefix l` -- open the focused sheet's scrollback in an editor (see below)
+- `prefix y` -- paste the clipboard into the focused sheet (see below)
 - `prefix q` -- quit
 - any other key -- sent to the focused sheet
 - `prefix prefix` -- send the prefix itself to the focused sheet (send-prefix)
@@ -136,6 +137,21 @@ afterwards, because the editor painted over it.
 The editor program is fixed to `kk` by default and can be changed with
 `$TUMU_EDITOR`; it is always launched as `<program> --tail`, so the program
 must accept `--tail` and read its text from standard input.
+
+### Clipboard
+
+A child that copies does it with OSC 52, which asks the *terminal* to change a
+selection. tumu is that terminal for its children, so it answers the ask itself
+for the one thing it can reach: it forwards the text to the host terminal's
+clipboard and keeps a copy of the last one. `prefix y` then pastes that same
+text back into the focused sheet, as a bracketed paste when the child asked for
+one.
+
+The copy is the *last* one, not a history, and until a child has copied there is
+nothing to paste, so `prefix y` does nothing. The copy is remembered as the
+bytes the child asked for, so a paste puts back exactly what was copied, even
+when the host write was lossy or was ignored -- OSC 52 has no reply, so whether
+the host took the text is not observable.
 
 ### Future: an embedded editor (memo)
 

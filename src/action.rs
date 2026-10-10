@@ -57,6 +57,18 @@ pub enum Action {
         index: usize,
     },
 
+    /// Paste the host clipboard into the session of the sheet at `index`.
+    ///
+    /// The action names *which* sheet, not *what* to paste: the clipboard
+    /// belongs to the host terminal, which only the edge holds, so the edge
+    /// reads it out and enqueues it as input. The core only decides that the
+    /// focused sheet is where it goes, exactly as it resolves focus for every
+    /// other action.
+    PasteClipboard {
+        /// The sheet whose session should receive the paste.
+        index: usize,
+    },
+
     /// The prefix latch is now armed and waiting for the next key.
     ///
     /// Nothing has to be done with it yet; it is reported so the edge can show

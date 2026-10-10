@@ -36,6 +36,16 @@ pub enum Command {
     /// command carries nothing and the edge assembles the text.
     EditScrollback,
 
+    /// Paste the last text a sheet copied into the focused sheet.
+    ///
+    /// This is the other half of copy mode: a child that copies with OSC 52
+    /// hands its text to the host terminal's clipboard, and this puts that
+    /// same text back into the focused sheet. The *content* is not part of the
+    /// command -- the clipboard belongs to the host terminal, which only the
+    /// edge holds -- so the command carries nothing and the edge supplies the
+    /// bytes.
+    PasteClipboard,
+
     /// Leave the multiplexer.
     Quit,
 }
