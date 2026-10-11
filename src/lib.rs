@@ -29,6 +29,7 @@ mod menu;
 mod orientation;
 mod ratio;
 mod render;
+mod scrollback;
 mod sheet;
 mod stack;
 mod state;
@@ -51,6 +52,7 @@ pub use render::{
     SheetContents, SheetGrid, draw_sheet_grid, frame, menu_frame, sheet_content_origin,
     sheet_content_size, sheet_frame,
 };
+pub use scrollback::{DEFAULT_CELLS, DEFAULT_LINES, ScrollbackLimit};
 pub use sheet::Sheet;
 pub use stack::Stack;
 pub use state::State;

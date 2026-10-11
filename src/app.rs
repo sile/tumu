@@ -17,6 +17,12 @@
 //! the text to the host terminal and remembers it, and `prefix y` sends the
 //! remembered bytes back to a sheet as [`termnix::Input::Paste`].
 //!
+//! The edge also owns the scrollback bound. `termnix` bounds no session's
+//! history on its own, so the edge trims each session to a
+//! [`tumu::ScrollbackLimit`] (from the binary's arguments) whenever a history
+//! line is appended. `prefix l` is what makes the bound matter: the scrollback
+//! it hands to an editor is only as large as the limit allows.
+//!
 //! One command leaves the loop for a moment: `prefix l` hands the focused
 //! sheet's scrollback to an external editor. That is the one place the edge
 //! gives the terminal up and takes it back, so the handover -- dropping the
@@ -180,16 +186,27 @@ pub struct App {
     /// most recently copied. It is empty until a child asks to copy, which is
     /// when a paste has nothing to do.
     clipboard: Option<Vec<u8>>,
+    /// How much scrollback each session may retain.
+    ///
+    /// `termnix` bounds nothing on its own, so this is where the bound is
+    /// applied: a session that appended a history line is trimmed to it. It
+    /// comes from the binary's arguments and never changes while tumu runs.
+    scrollback: tumu::ScrollbackLimit,
     dirty: bool,
     exit: bool,
 }
 
 impl App {
     /// Takes over the terminal and prepares to run `shell` in every sheet.
+    ///
+    /// `scrollback` is how much history each session is allowed to keep; it is
+    /// the bound the edge applies as sessions run, since `termnix` applies
+    /// none itself.
     pub fn new(
         state: tumu::State,
         shell: ShellCommand,
         editor: EditorCommand,
+        scrollback: tumu::ScrollbackLimit,
     ) -> std::io::Result<Self> {
         let driver = take_terminal()?;
         let mut app = Self {
@@ -202,6 +219,7 @@ impl App {
             sessions: HashMap::new(),
             next_session_id: std::num::NonZeroU64::MIN,
             clipboard: None,
+            scrollback,
             dirty: true,
             exit: false,
         };
@@ -256,6 +274,10 @@ impl App {
     /// left over.
     fn drain_sessions(&mut self) -> std::io::Result<()> {
         let ids: Vec<tumu::TermnixSessionId> = self.sessions.keys().copied().collect();
+        // Copied out before any session is borrowed: the bound is applied while
+        // a session is borrowed mutably out of `self.sessions`, and reading it
+        // from `self` there would be a second borrow of the same value.
+        let limit = self.scrollback;
         for id in ids {
             let Some(session) = self.sessions.get_mut(&id) else {
                 continue;
@@ -297,10 +319,25 @@ impl App {
             // than appending to it.
             let mut title: Option<String> = None;
             let mut clipboard: Option<Vec<u8>> = None;
+            // A history line was appended, so the session now holds more
+            // scrollback than the bound allows and has to be trimmed. The
+            // trim is a no-op while under the bound, so it is only worth a
+            // call when an append actually happened; every other event leaves
+            // the retained history untouched.
+            let mut trim = false;
             while let Some(event) = session.dequeue_event() {
                 match event {
                     termnix::Event::ScreenUpdated | termnix::Event::TerminalReset => {
                         self.dirty = true;
+                    }
+                    // `termnix` bounds no session's scrollback on its own: the
+                    // history grows until the caller trims it. An append is the
+                    // one event that moves the session over the bound, so it is
+                    // the one that asks for the trim. Whether the line is still
+                    // over the bound decides nothing here -- the trim checks
+                    // both limits and removes nothing when they hold.
+                    termnix::Event::ScrollbackLineAppended => {
+                        trim = true;
                     }
                     // Several title changes since the last drain merge into
                     // one event, so the current title is read rather than a
@@ -322,6 +359,15 @@ impl App {
                     }
                     _ => {}
                 }
+            }
+            // The bound is applied once the queue is drained, so a single trim
+            // covers every line that arrived in the drain, however many events
+            // merged into the run. It runs here, before the borrows of `self`
+            // below, because it is the last use of `session`: the title and
+            // clipboard handling that follows read from `self`, which the
+            // mutable borrow of `self.sessions` would otherwise reject.
+            if trim {
+                session.trim_scrollback(limit.lines(), limit.cells());
             }
             if let Some(text) = clipboard {
                 self.set_clipboard(&text);

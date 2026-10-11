@@ -25,18 +25,40 @@ fn main() -> noargs::Result<()> {
     }
     noargs::HELP_FLAG.take_help(&mut args);
 
+    // How many scrollback lines each session may keep. The option carries its
+    // own precedence: `--scrollback` beats `$TUMU_SCROLLBACK`, which beats the
+    // built-in default, so the three layers come from this one declaration.
+    // `termnix` bounds nothing on its own, so the number reaches the edge and is
+    // what keeps a long-running session from growing without limit. Zero is a
+    // real choice -- "keep no history" -- and is passed through as such.
+    //
+    // The default is a literal because `noargs` takes a `&'static str`; it must
+    // stay equal to `tumu::DEFAULT_LINES`, which spells the same number.
+    let scrollback_lines: usize = noargs::opt("scrollback")
+        .short('s')
+        .ty("LINES")
+        .env("TUMU_SCROLLBACK")
+        .default("1000")
+        .doc("Scrollback lines each sheet keeps (0 disables history)")
+        .take(&mut args)
+        .then(|a| a.value().parse::<usize>())?;
+
     if let Some(help) = args.finish()? {
         print!("{help}");
         return Ok(());
     }
 
+    // The cell bound is not a user knob: lines are what a person reasons about,
+    // and the cell bound is only the guard that keeps a few pathologically wide
+    // lines from dwarfing the line bound. It keeps its default.
+    let scrollback = tumu::ScrollbackLimit::new(scrollback_lines, tumu::DEFAULT_CELLS);
     // The real size arrives as a resize the driver reports once the terminal
     // is taken over, so the seed here is only a placeholder that the first
     // resize replaces.
     let seed = tuinix::Size { rows: 24, cols: 80 };
     let shell = shell_command();
     let editor = editor_command();
-    match app::App::new(tumu::State::new(seed), shell, editor) {
+    match app::App::new(tumu::State::new(seed), shell, editor, scrollback) {
         Ok(mut app) => app.run()?,
         Err(err) => {
             eprintln!("tumu: {err}");

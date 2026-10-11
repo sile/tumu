@@ -15,6 +15,7 @@ tumu
   - No server (a standalone process)
   - Mouse: click a sheet to focus it
   - tmux like copy-mode (PoC)
+  - Bounded scrollback, set by `--scrollback` or `$TUMU_SCROLLBACK`
 
 Stacked sheets
 --------------
@@ -137,6 +138,23 @@ afterwards, because the editor painted over it.
 The editor program is fixed to `kk` by default and can be changed with
 `$TUMU_EDITOR`; it is always launched as `<program> --tail`, so the program
 must accept `--tail` and read its text from standard input.
+
+### Scrollback
+
+A sheet's scrollback is bounded, because the emulator keeps none of its own.
+Each session is trimmed to a line limit as it runs, so a sheet that prints for
+days does not grow without end, and the text `prefix l` hands to the editor is
+only as long as the bound allows. The default is 1000 lines; the earliest lines
+are dropped first, so the newest history always survives.
+
+The bound can be set two ways, with the command line taking precedence over the
+environment:
+
+- `--scrollback LINES` (or `-s LINES`)
+- `$TUMU_SCROLLBACK`
+
+A limit of `0` means "keep no history", not "keep everything": the sheet shows
+its screen and nothing above it.
 
 ### Clipboard
 

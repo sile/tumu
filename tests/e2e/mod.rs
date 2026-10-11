@@ -67,6 +67,19 @@ impl TumuHarness {
         })
     }
 
+    /// Launches the `tumu` binary, letting `setup` adjust the command first.
+    ///
+    /// This is the escape hatch for the tests that need an argument or an
+    /// environment variable `tumu` does not otherwise take from a caller: the
+    /// setup closure sees the raw [`Command`], so it can add either before the
+    /// child starts.
+    pub fn with_args<F>(rows: u16, cols: u16, setup: F) -> Self
+    where
+        F: FnOnce(&mut Command),
+    {
+        Self::spawn(rows, cols, setup)
+    }
+
     /// Launches the binary, letting `setup` adjust the command first.
     fn spawn<F>(rows: u16, cols: u16, setup: F) -> Self
     where
