@@ -22,27 +22,23 @@ fn started(rows: usize, cols: usize) -> tumu::State {
     state
 }
 
-/// A [`tumu::SheetContents`] that answers with one fixed grid.
+/// Returns a [`tumu::SheetGrids`] holding no grids: the chrome and nothing
+/// under it.
 ///
-/// The closure form is not usable for the trait -- a closure cannot return an
-/// owned grid borrowing the caller's lifetime -- so tests spell the answer out.
-/// This is the smallest thing that can: one grid for one index.
-struct FixedGrid<'a> {
-    index: usize,
-    grid: tumu::SheetGrid<'a>,
+/// This is what a test that asserts on the layout -- borders, titles, the menu
+/// -- passes: the grids under the borders are not what it is looking at.
+fn no_grids() -> tumu::SheetGrids<'static> {
+    tumu::SheetGrids::new()
 }
 
-impl tumu::SheetContents for FixedGrid<'_> {
-    fn grid(&self, index: usize) -> Option<tumu::SheetGrid<'_>> {
-        (index == self.index).then(|| tumu::SheetGrid {
-            // `SheetGrid`'s rows are borrowed for `'_`, which here is the
-            // caller's borrow of `self`; rebuilding the `Vec` each call is what
-            // keeps the borrow honest as the trait's `'_` is per call.
-            rows: self.grid.rows.clone(),
-            cursor: self.grid.cursor,
-            cursor_visible: self.grid.cursor_visible,
-        })
-    }
+/// Returns a [`tumu::SheetGrids`] holding one grid, for sheet 0.
+///
+/// There is no trait to implement and nothing to clone: the collection is
+/// filled in by hand, exactly as the edge fills it in from its sessions.
+fn grids_of(grid: tumu::SheetGrid<'_>) -> tumu::SheetGrids<'_> {
+    let mut grids = tumu::SheetGrids::new();
+    grids.push(Some(grid));
+    grids
 }
 
 /// Returns the text of one row of a frame, left to right.
@@ -83,7 +79,7 @@ fn the_renderer_never_paints_outside_the_frame() {
                 state.stack.push_top();
             }
 
-            let frame = tumu::frame(&state, &());
+            let frame = tumu::frame(&state, &no_grids());
 
             for (position, _) in frame.chars() {
                 assert!(position.row < rows, "row {position:?} within {rows}");
@@ -99,7 +95,7 @@ fn a_vertical_border_names_the_focused_sheet_with_the_label() {
     // A tall, narrow terminal stacks vertically, so the border is the last row.
     let state = started(24, 40);
 
-    let frame = tumu::frame(&state, &());
+    let frame = tumu::frame(&state, &no_grids());
     let bottom = row_text(&frame, 23);
 
     // The one sheet is focused, so its border carries the command label and
@@ -124,7 +120,7 @@ fn an_unfocused_border_has_no_label() {
     let second = state.stack.sheets()[1].0;
     state.focused = Some(second);
 
-    let frame = tumu::frame(&state, &());
+    let frame = tumu::frame(&state, &no_grids());
 
     // Every border starts with the corner, and the label appears exactly once.
     let screen: String = frame.chars().map(|(_, ch)| ch.value()).collect();
@@ -138,7 +134,7 @@ fn a_horizontal_border_is_written_vertically_in_the_last_column() {
     // column of the sheet, the text read top to bottom.
     let state = started(24, 80);
 
-    let frame = tumu::frame(&state, &());
+    let frame = tumu::frame(&state, &no_grids());
     let right = col_text(&frame, 79);
 
     assert!(
@@ -165,7 +161,7 @@ fn a_narrow_sheet_does_not_leak_its_border_onto_its_neighbour() {
         title: "T".repeat(200),
     });
 
-    let frame = tumu::frame(&state, &());
+    let frame = tumu::frame(&state, &no_grids());
 
     // Sheet 0 (columns 0..40) is unfocused: its own last column is a bare
     // corner and rule, with no label and no leaked `T`.
@@ -199,7 +195,7 @@ fn a_sheet_with_no_contents_shows_only_its_border() {
     // own case elsewhere).
     let state = started(24, 40);
 
-    let frame = tumu::frame(&state, &());
+    let frame = tumu::frame(&state, &no_grids());
 
     assert!(
         row_text(&frame, 23).starts_with("└ [C-q ...]"),
@@ -239,7 +235,7 @@ fn contents_are_painted_to_the_left_of_the_border_and_clipped_at_the_sheet_edge(
         cursor: termnix::Position { row: 0, col: 0 },
         cursor_visible: false,
     };
-    let contents = FixedGrid { index: 0, grid };
+    let contents = grids_of(grid);
 
     let frame = tumu::frame(&state, &contents);
 
@@ -264,7 +260,7 @@ fn the_menu_is_painted_over_the_sheets_when_it_is_open() {
     assert!(!state.menu, "the menu is closed at startup");
 
     state.menu = true;
-    let frame = tumu::frame(&state, &());
+    let frame = tumu::frame(&state, &no_grids());
     let text: String = frame.chars().map(|(_, ch)| ch.value()).collect();
 
     // The box's corner and the header are on screen.
@@ -291,7 +287,7 @@ fn a_closed_menu_paints_nothing_over_the_sheets() {
     let mut state = started(24, 40);
     state.menu = false;
 
-    let frame = tumu::frame(&state, &());
+    let frame = tumu::frame(&state, &no_grids());
     let text: String = frame.chars().map(|(_, ch)| ch.value()).collect();
 
     assert!(!text.contains('┌'), "no box when the menu is closed");
@@ -303,7 +299,7 @@ fn the_menu_paints_the_rows_the_layout_names() {
     let mut state = started(24, 40);
     state.menu = true;
     let layout = state.menu_layout().expect("the menu fits 24x40");
-    let frame = tumu::frame(&state, &());
+    let frame = tumu::frame(&state, &no_grids());
 
     // Every command row's own screen row shows its key and its label, so the
     // renderer and the hit-test use the same rectangles.

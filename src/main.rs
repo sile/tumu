@@ -58,7 +58,14 @@ fn main() -> noargs::Result<()> {
     let seed = tuinix::Size { rows: 24, cols: 80 };
     let shell = shell_command();
     let editor = editor_command();
-    match app::App::new(tumu::State::new(seed), shell, editor, scrollback) {
+    let editor_dir = editor_dir();
+    match app::App::new(
+        tumu::State::new(seed),
+        shell,
+        editor,
+        scrollback,
+        editor_dir,
+    ) {
         Ok(mut app) => app.run()?,
         Err(err) => {
             eprintln!("tumu: {err}");
@@ -68,17 +75,30 @@ fn main() -> noargs::Result<()> {
     Ok(())
 }
 
-/// Builds the recipe for the external editor `prefix l` hands the scrollback
-/// to.
+/// Builds the recipe for the external editor `prefix l` opens in a new sheet.
 ///
-/// The editor is launched as `<program> --tail` with the scrollback on its
-/// standard input, so only the program is configurable. `$TUMU_EDITOR` names it
-/// and falls back to `kk`, the editor this PoC is built around; the variable
-/// exists so a user (or a test) can point the feature at another editor without
-/// a rebuild.
+/// The editor is launched as `<program> --tail <path>`, where the path is the
+/// file the edge wrote the scrollback to, so only the program is configurable.
+/// `$TUMU_EDITOR` names it and falls back to `kk`, the editor this PoC is built
+/// around; the variable exists so a user (or a test) can point the feature at
+/// another editor without a rebuild.
 fn editor_command() -> app::EditorCommand {
     let program = std::env::var_os("TUMU_EDITOR").unwrap_or_else(|| "kk".into());
     app::EditorCommand::new(PathBuf::from(program))
+}
+
+/// Returns the directory an editor sheet's file is written to.
+///
+/// The core names a bare file name for the text `prefix l` opens; the directory
+/// is the binary's to choose, because only the edge may touch the file system.
+/// `$TMPDIR` is the normal place for scratch files and is what Termux points at
+/// its app-private temp, so it is preferred; `/tmp` is the fallback when the
+/// variable is unset. The directory carries the process id so two tumu runs
+/// cannot step on each other's files, and `tumu` names it so a leftover file is
+/// recognisable.
+fn editor_dir() -> PathBuf {
+    let base = std::env::var_os("TMPDIR").unwrap_or_else(|| "/tmp".into());
+    PathBuf::from(base).join(format!("{}-{}", env!("CARGO_PKG_NAME"), std::process::id()))
 }
 
 /// Builds the recipe for the shell tumu runs in every sheet: the user's login

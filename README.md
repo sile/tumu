@@ -121,29 +121,28 @@ Copy mode (PoC)
 
 `prefix l` is the first step of a tmux-like copy mode, kept simple for now: the
 focused sheet's scrollback -- the history the emulator has pushed off the top,
-followed by the rows still on screen -- is joined into text and handed to an
-external editor through its standard input. The editor is launched as
-`kk --tail` (see `../kk`): it reads the text from the pipe and takes its keys
-from the controlling terminal, so no temporary file is needed, and `--tail`
-opens at the end so the latest scrollback is what the editor shows first. What
-the editor does with the terminal afterwards is its own business; selecting and
-copying live in the editor for now, and tumu only collects the text and opens
-it.
+followed by the rows still on screen -- is joined into text and opened in an
+external editor. The editor runs in a **sheet of its own**, pushed on top like
+any new sheet: tumu writes the text to a temporary file and spawns the editor
+as that sheet's session, so the editor is painted like any other child and the
+editor's exit closes its sheet through the ordinary session-exit path.
 
-To hand the terminal over, tumu drops its `tuinix::TerminalDriver` (restoring
-raw mode, the alternate screen, and the cursor), runs the editor, and builds a
-fresh driver when the editor exits. The screen is repainted from scratch
-afterwards, because the editor painted over it.
+Nothing is handed over. The terminal driver stays up, so the frames of the
+other sheets keep their meaning and the screen is never repainted from scratch.
+The temporary file is removed when the editor exits.
 
 The editor program is fixed to `kk` by default and can be changed with
-`$TUMU_EDITOR`; it is always launched as `<program> --tail`, so the program
-must accept `--tail` and read its text from standard input.
+`$TUMU_EDITOR`; it is always launched as `<program> --tail <path>`, so the
+program must accept `--tail` and open the file it names. `--tail` opens at the
+end, so the latest scrollback is what the editor shows first; what it does with
+the file afterwards is its own business, and selecting and copying live in the
+editor for now.
 
 ### Scrollback
 
 A sheet's scrollback is bounded, because the emulator keeps none of its own.
 Each session is trimmed to a line limit as it runs, so a sheet that prints for
-days does not grow without end, and the text `prefix l` hands to the editor is
+days does not grow without end, and the file `prefix l` opens in the editor is
 only as long as the bound allows. The default is 1000 lines; the earliest lines
 are dropped first, so the newest history always survives.
 
@@ -173,20 +172,18 @@ the host took the text is not observable.
 
 ### Future: an embedded editor (memo)
 
-The external-editor handoff above is a stopgap. Launching a child and giving it
-the whole terminal means the editor is always full screen, whatever region the
-focused sheet actually had: a sheet split off from the stack still opens the
-editor over the whole display. The handover is also the one place tumu gives the
-terminal up and takes it back, which is why the frame has to be repainted from
-scratch afterwards.
+The external-editor sheet above is a stopgap. Running `kk` as a child in its own
+sheet removed the whole-terminal handoff, but the editor still gets a whole
+sheet to itself; a copy mode that shared the focused sheet's own region would be
+lighter still.
 
-Both go away if `kk` is used as a *library* instead of as a child process, which
-its design already allows: `kk`'s core is Sans I/O, so `State` plus the
-`render_*` functions paint a `tuinix::Frame` directly, and tumu is already
-building one frame per sheet. An embedded copy mode would:
+That needs `kk` used as a *library* instead of as a child process, which its
+design already allows: `kk`'s core is Sans I/O, so `State` plus the `render_*`
+functions paint a `tuinix::Frame` directly, and tumu is already building one
+frame per sheet. An embedded copy mode would:
 
 - build a `kk::State` over the focused sheet's scrollback text (`kk::TextBuffer`
-  over the same rows `scrollback_text` collects today),
+  over the same rows the edge's `scrollback_text` collects today),
 - route keys and mouse to it while it is open (`kk::Mode::resolve` -> the
   matching `State::handle_*`), and
 - paint it into a `tuinix::Frame` the size of the sheet's *content* region and

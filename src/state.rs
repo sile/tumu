@@ -1,6 +1,6 @@
 //! The multiplexer state and its pure handlers.
 
-use crate::{Action, Command, Event, SheetId, Stack};
+use crate::{Action, Command, Event, Program, SheetId, Stack};
 
 /// The index of the top of the stack: where a new sheet is pushed.
 ///
@@ -135,6 +135,7 @@ impl State {
     /// state and returns plain values. The events that imply I/O -- spawning a
     /// session for a new sheet, resizing one after a change, forwarding a key to
     /// a child -- return the intents to do so rather than performing them.
+    ///
     pub fn update(&mut self, event: Event) -> Vec<Action> {
         match event {
             Event::Key(key) => self.handle_key(key),
@@ -351,7 +352,10 @@ impl State {
     fn handle_new_sheet(&mut self) -> Vec<Action> {
         let id = self.stack.push_top();
         self.focused = Some(id);
-        let mut actions = vec![Action::SpawnSession { index: STACK_TOP }];
+        let mut actions = vec![Action::SpawnSession {
+            index: STACK_TOP,
+            program: Program::Shell,
+        }];
         actions.extend(self.resize_actions());
         actions
     }
@@ -360,15 +364,29 @@ impl State {
     ///
     /// Does nothing when the stack is empty. The remaining sheets re-derive
     /// their regions, so closing one grows the rest.
+    ///
+    /// The session is named *before* the sheet is removed: removing first would
+    /// leave an index that names whatever sheet shifted into the gap, and the
+    /// edge carries the action out after the removal, so it would close the
+    /// wrong session. A sheet whose session has not been spawned yet has none to
+    /// close, which is why the id is read as an `Option`.
     fn handle_close_sheet(&mut self) -> Vec<Action> {
         let Some(index) = self.focused_index() else {
             return Vec::new();
         };
+        let session = self
+            .stack
+            .sheets()
+            .get(index)
+            .and_then(|(_, sheet)| sheet.session);
         self.stack.remove(index);
         // The next sheet to show is the one that took the closed sheet's place,
         // or the new bottom when the closed one was last.
         self.focused = successor(self.stack.sheets(), index);
-        let mut actions = vec![Action::CloseSession { index }];
+        let mut actions = Vec::new();
+        if let Some(session) = session {
+            actions.push(Action::CloseSession { session });
+        }
         actions.extend(self.resize_actions());
         actions
     }
@@ -395,22 +413,83 @@ impl State {
         self.resize_actions()
     }
 
-    /// Asks the edge to open the focused sheet's scrollback in an editor.
+    /// Opens the focused sheet's scrollback in an editor, in a sheet of its own.
     ///
-    /// The core names the sheet and stops there: the scrollback belongs to the
-    /// `termnix` session the sheet hosts, which the core does not hold, so the
-    /// edge reads it out and hands it on. Focus is resolved here, as for every
-    /// other action, so a rotation moves the keyboard *and* the history a later
-    /// `prefix l` opens together.
+    /// This is `prefix l`, and it is the one command that adds a sheet *and*
+    /// names a program for it. Two things decide that shape:
     ///
-    /// Nothing in the state changes: opening the scrollback is not a view of
-    /// tumu's own, so the stack, the focus, and the full-screen flag are left as
-    /// they were. An empty stack has nothing to open, so it is a no-op.
+    /// - The editor is a child like any other, so it lives in a session, and a
+    ///   session lives in a sheet. Running it there rather than over the whole
+    ///   terminal is what keeps the multiplexer in control: the driver is never
+    ///   dropped, the frames of the other sheets keep their meaning, and the
+    ///   editor's exit closes its sheet through the ordinary
+    ///   [`SessionExited`](crate::Event::SessionExited) path rather than through
+    ///   a hand-over with its own rules.
+    /// - The text it opens is the focused sheet's scrollback, which the core
+    ///   does not hold. The core names the *sheet* and the edge reads the
+    ///   scrollback out of the session behind it: turning cells into characters
+    ///   is a `termnix` transcription with no decision of tumu's in it, so it
+    ///   belongs with the session, not in the model.
+    ///
+    /// Nothing is opened when there is no sheet to read: an empty stack is the
+    /// one no-op. A sheet whose session has no scrollback to offer still gets an
+    /// editor, on an empty file.
+    ///
+    /// Focus moves to the editor sheet, so closing it (with `prefix x`, or by
+    /// quitting the editor) leaves the keyboard on the sheet the editor was
+    /// opened *from*.
     fn handle_edit_scrollback(&mut self) -> Vec<Action> {
         let Some(index) = self.focused_index() else {
             return Vec::new();
         };
-        vec![Action::EditScrollback { index }]
+        self.handle_new_editor_sheet(index)
+    }
+
+    /// Adds a sheet whose session is the editor, opened on the scrollback of
+    /// the sheet at `from`.
+    ///
+    /// The sheet the editor is opened *from* is named rather than the text it
+    /// holds, because the text is the edge's to read: the action that asks for
+    /// the editor carries the sheet, and the edge resolves it to a session the
+    /// same way it resolves every other action's sheet.
+    ///
+    /// The sheet is pushed and focused exactly as [`handle_new_sheet`] pushes
+    /// one, so the editor appears where any new sheet appears -- on top, under
+    /// the keyboard -- and the sheets under it re-derive their regions. The
+    /// spawn is named by [`STACK_TOP`] for the same reason.
+    ///
+    /// The editor's file is named here -- a bare name, not a path -- so the
+    /// whole story is one action: "this sheet, this file". The name is derived
+    /// from the sheet's id, which is unique for the life of the run, so two
+    /// editor sheets cannot collide; where the file goes is the edge's, which is
+    /// the only side that may touch the file system.
+    ///
+    /// [`handle_new_sheet`]: State::handle_new_sheet
+    fn handle_new_editor_sheet(&mut self, from: usize) -> Vec<Action> {
+        let Some(session) = self
+            .stack
+            .sheets()
+            .get(from)
+            .and_then(|(_, sheet)| sheet.session)
+        else {
+            return Vec::new();
+        };
+        let id = self.stack.push_top();
+        self.focused = Some(id);
+        let name = format!("{}-{id}.txt", crate::input::SCROLLBACK_FILE_PREFIX);
+        vec![
+            Action::OpenEditor {
+                index: STACK_TOP,
+                session,
+            },
+            Action::SpawnSession {
+                index: STACK_TOP,
+                program: Program::Editor { name },
+            },
+        ]
+        .into_iter()
+        .chain(self.resize_actions())
+        .collect()
     }
 
     /// Asks the edge to paste the host clipboard into the focused sheet.
@@ -507,7 +586,10 @@ impl State {
         if self.stack.is_empty() {
             let id = self.stack.push_top();
             self.focused = Some(id);
-            actions.push(Action::SpawnSession { index: STACK_TOP });
+            actions.push(Action::SpawnSession {
+                index: STACK_TOP,
+                program: Program::Shell,
+            });
         }
 
         actions.extend(self.resize_actions());
@@ -531,7 +613,10 @@ impl State {
             // the flag clears rather than zoom the sheet that took its place.
             self.full_screen = false;
         }
-        let mut actions = vec![Action::CloseSession { index }];
+        // No `CloseSession` is returned: the child is already gone -- this event
+        // is how the edge reports that -- so there is no session left to close.
+        // The sheet is all that had to go.
+        let mut actions = Vec::new();
         actions.extend(self.resize_actions());
         actions
     }

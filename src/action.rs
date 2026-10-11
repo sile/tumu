@@ -1,5 +1,30 @@
 //! The intents the core returns for the edge to carry out.
 
+/// What a new session in a sheet should run.
+///
+/// The core decides *which* program a sheet hosts; it does not build the
+/// command. A sheet is usually a shell, but `prefix l` opens one whose session
+/// is an editor reading a file the core also named -- so the choice has to
+/// travel with the spawn rather than be fixed at the edge.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Program {
+    /// The user's shell, as every ordinary sheet runs.
+    Shell,
+
+    /// The external editor, opened on the file named `name`.
+    ///
+    /// The core names the file because the core is what wrote the text: the
+    /// scrollback is a pure function of the sessions' terminal states, so the
+    /// core assembles it and the edge writes it out. The name is bare -- a file
+    /// name, not a path -- because *where* files may be written is the edge's to
+    /// know; the directory is added there, once, so the spawn and the write
+    /// cannot disagree about it.
+    Editor {
+        /// The file to open, without a directory.
+        name: String,
+    },
+}
+
 /// One thing the edge should do.
 ///
 /// An action names *what* to do, not *how*: the core decides that a sheet was
@@ -11,6 +36,30 @@ pub enum Action {
     SpawnSession {
         /// The sheet that should host the new session.
         index: usize,
+
+        /// What to run in it.
+        program: Program,
+    },
+
+    /// Write the scrollback of `session` to a file and open it in an editor in
+    /// the sheet at `index`.
+    ///
+    /// This is `prefix l`, and it is deliberately *not* a terminal handover:
+    /// the editor runs as the session of a new sheet, so it is painted like any
+    /// other child and the multiplexer keeps the terminal. The core has already
+    /// added the sheet and named the index it wants the editor in, so the edge
+    /// only has to put the bytes on disk and spawn.
+    ///
+    /// The session is named rather than its text because reading the text --
+    /// cells to characters, trailing blanks trimmed -- needs the session, which
+    /// the edge holds and the core does not. The core picks *whose* history to
+    /// show; the edge has the bytes.
+    OpenEditor {
+        /// Where the editor session should go.
+        index: usize,
+
+        /// The session whose scrollback the editor opens.
+        session: crate::TermnixSessionId,
     },
 
     /// Resize the session hosted by the sheet at `index` to `size`.
@@ -21,10 +70,16 @@ pub enum Action {
         size: termnix::Size,
     },
 
-    /// Close the session hosted by the sheet at `index`.
+    /// Close the session with this id.
+    ///
+    /// The session is named by id rather than by the index of the sheet that
+    /// hosts it, because the core has already removed that sheet from the stack
+    /// by the time the edge carries the action out: an index would name whatever
+    /// sheet shifted into the gap, and closing *that* sheet's session is the bug
+    /// this shape exists to avoid.
     CloseSession {
-        /// The sheet whose session should be closed.
-        index: usize,
+        /// The session to close.
+        session: crate::TermnixSessionId,
     },
 
     /// Send a key to the session hosted by the focused sheet.
@@ -43,18 +98,6 @@ pub enum Action {
 
         /// The key to forward.
         key: tuinix::KeyInput,
-    },
-
-    /// Hand the scrollback of the sheet at `index` to an external editor.
-    ///
-    /// The action names *which* sheet, not *what* to show it: the scrollback
-    /// lives in the `termnix` session the sheet hosts, which only the edge
-    /// holds, so the edge reads it out and passes it on. The core only decides
-    /// that the focused sheet's history is what should be opened, exactly as it
-    /// resolves focus for every other action.
-    EditScrollback {
-        /// The sheet whose scrollback should be opened.
-        index: usize,
     },
 
     /// Paste the host clipboard into the session of the sheet at `index`.

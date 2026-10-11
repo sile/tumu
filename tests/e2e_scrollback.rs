@@ -1,11 +1,11 @@
-//! End-to-end test for handing the scrollback to an external editor.
+//! End-to-end test for opening the scrollback in an external editor.
 //!
-//! `prefix l` runs the editor named by `$TUMU_EDITOR` with the focused sheet's
-//! scrollback on its standard input. The tests point `$TUMU_EDITOR` at a small
-//! script that copies its standard input to a known path, so the text tumu
-//! produced can be read back and asserted on. The editor is a stand-in for
-//! `kk`: what is under test is that tumu collects the scrollback and writes it
-//! to the child's standard input, not what the child is.
+//! `prefix l` runs the editor named by `$TUMU_EDITOR` in a **new sheet**, on a
+//! file holding the focused sheet's scrollback. The tests point `$TUMU_EDITOR`
+//! at a small script that copies the file it was named to a known path, so the
+//! text tumu wrote can be read back and asserted on. The editor is a stand-in
+//! for `kk`: what is under test is that tumu writes the scrollback to a file and
+//! spawns the editor on it, not what the child is.
 
 mod e2e;
 
@@ -27,16 +27,25 @@ fn out_path(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("tumu-e2e-{}-{}.out", std::process::id(), name))
 }
 
+/// Builds an editor script that copies the file it is opened on to `out`.
+///
+/// `prefix l` spawns the editor as `<program> --tail <path>`, so the file to
+/// read is the *last* argument. The script takes the last argument and copies
+/// it to `out`, which is the stand-in for `kk` opening the file: what the test
+/// reads back is the bytes tumu wrote, not what the editor did with them. It
+/// then exits, which closes its sheet through the ordinary session-exit path.
+fn copy_editor(out: &std::path::Path) -> String {
+    format!("eval \"last=\\${{$#}}\"; cp \"$last\" {}", out.display())
+}
+
 #[test]
-fn the_prefix_l_hand_off_sends_the_sheet_output_to_the_editor() {
+fn the_editor_receives_the_sheet_scrollback_and_closes_on_exit() {
     // The sheet prints a marker and then waits, so its output stays on screen
     // while the scrollback is collected.
     let shell = script("scrollback-shell", "echo SHEET-HELLO; exec sleep 30");
-    // The editor copies everything on its standard input to the output file.
-    // It ignores its own argv (`--tail`): what matters is the pipe tumu fills,
-    // which is what `kk --tail` reads.
+    // The editor copies the file it was opened on to the output file.
     let out = out_path("handoff");
-    let editor = script("scrollback-editor", &format!("cat > {}", out.display()));
+    let editor = script("scrollback-editor", &copy_editor(&out));
 
     let mut tumu = e2e::TumuHarness::with_shell_and_editor(
         40,
@@ -49,16 +58,62 @@ fn the_prefix_l_hand_off_sends_the_sheet_output_to_the_editor() {
     tumu.send_prefix();
     tumu.send_char('l');
 
-    // The editor runs and writes the scrollback out. The sheet's marker must be
-    // part of it, which proves the session's own output reached the editor.
+    // The editor runs and copies the scrollback out. The sheet's marker must be
+    // part of it, which proves the session's own output reached the file the
+    // editor was opened on.
     tumu.wait_until("the editor received the scrollback", |_| {
         fs::read_to_string(&out)
             .map(|text| text.contains("SHEET-HELLO"))
             .unwrap_or(false)
     });
 
-    // tumu is back in control afterwards: the sheet's border is on screen again.
-    tumu.wait_for_text("└ [C-q ...]");
+    // The editor's own exit closes its sheet through the ordinary session-exit
+    // path, so the stack is back to the one sheet it started with: the shell's
+    // label is on screen again.
+    tumu.wait_for_text("SHEET-HELLO");
+}
+
+#[test]
+fn the_editor_opens_in_a_new_sheet_above_the_one_it_came_from() {
+    // The editor stays alive, so its sheet is still up while it is asserted on.
+    let shell = script("editor-sheet-shell", "echo SHEET-HELLO; exec sleep 30");
+    let editor = script("editor-sheet-editor", "echo EDITOR-RUNNING; exec sleep 30");
+
+    // A 40x30 terminal is taller than wide, so the stack runs vertically and the
+    // editor sheet -- pushed on top -- takes the rows above the shell's.
+    let mut tumu = e2e::TumuHarness::with_shell_and_editor(
+        40,
+        30,
+        shell.to_str().expect("utf-8 path"),
+        editor.to_str().expect("utf-8 path"),
+    );
+    tumu.wait_for_text("SHEET-HELLO");
+
+    // One sheet before: the label is on the only border there is, the last row.
+    assert!(
+        tumu.screen_rows()[39].starts_with("└ [C-q ...]"),
+        "the single sheet carries the label:\n{}",
+        tumu.screen_text()
+    );
+
+    tumu.send_prefix();
+    tumu.send_char('l');
+    tumu.wait_for_text("EDITOR-RUNNING");
+
+    // Two sheets now, the editor on top. The label stays on the *focused*
+    // sheet's border, so its moving up to row 19 is what proves the editor
+    // sheet exists and holds focus.
+    assert!(
+        tumu.screen_rows()[19].starts_with("└ [C-q ...]"),
+        "the editor's sheet carries the label:\n{}",
+        tumu.screen_text()
+    );
+    // The sheet the editor came from is still there, below, with its output.
+    assert!(
+        tumu.screen_contains("SHEET-HELLO"),
+        "the shell's sheet stays below:\n{}",
+        tumu.screen_text()
+    );
 }
 
 /// Prints `count` numbered markers, then waits so they stay in the history.
@@ -69,11 +124,53 @@ fn marker_shell(count: u32) -> String {
     format!("for i in $(seq 1 {count}); do echo LINE-$i; done; exec sleep 30")
 }
 
+#[test]
+fn the_editor_file_holds_history_and_visible_rows_without_trailing_blanks() {
+    // More lines than the sheet can show, so the earliest markers scroll off
+    // the visible grid and into history. The file must hold both halves: the
+    // history first, then the rows still on screen.
+    let shell = script("text-shell", &marker_shell(60));
+    let out = out_path("text");
+    let editor = script("text-editor", &copy_editor(&out));
+
+    let mut tumu = e2e::TumuHarness::with_args(24, 80, {
+        let shell = shell.to_str().expect("utf-8 path").to_string();
+        let editor = editor.to_str().expect("utf-8 path").to_string();
+        move |command| {
+            command.env("SHELL", &shell);
+            command.env("TUMU_EDITOR", &editor);
+        }
+    });
+    tumu.wait_for_text("LINE-60");
+
+    let text = hand_off_scrollback(&mut tumu, &out);
+
+    // The oldest marker is in history and the newest is on screen: the file
+    // spans both, head to tail.
+    assert!(
+        text.contains("LINE-1\n"),
+        "the file starts with the oldest retained line:\n{text}"
+    );
+    assert!(
+        text.contains("LINE-60"),
+        "the file ends with the newest line:\n{text}"
+    );
+    // Each row is trimmed of its trailing blanks, so a line is just its
+    // marker: no line carries the padding a full-width terminal row would.
+    for line in text.lines() {
+        assert_eq!(
+            line,
+            line.trim_end(),
+            "a line kept trailing blanks: {line:?}"
+        );
+    }
+}
+
 /// Runs `prefix l` and returns the text the editor received.
 ///
-/// The editor copies its standard input to `out`; the test waits for the file
-/// to appear and non-empty, then reads it. Passing the editor the output path
-/// keeps every caller from repeating the wait.
+/// The editor copies the file it was opened on to `out`; the test waits for the
+/// file to appear and non-empty, then reads it. Passing the editor the output
+/// path keeps every caller from repeating the wait.
 fn hand_off_scrollback(tumu: &mut e2e::TumuHarness, out: &std::path::Path) -> String {
     tumu.send_prefix();
     tumu.send_char('l');
@@ -92,7 +189,7 @@ fn the_scrollback_is_trimmed_to_the_cli_limit() {
     // editor sees the tail and not the head.
     let shell = script("trim-shell", &marker_shell(60));
     let out = out_path("trim-cli");
-    let editor = script("trim-editor", &format!("cat > {}", out.display()));
+    let editor = script("trim-editor", &copy_editor(&out));
 
     let mut tumu = e2e::TumuHarness::with_args(24, 80, {
         let shell = shell.to_str().expect("utf-8 path").to_string();
@@ -124,7 +221,7 @@ fn the_scrollback_limit_can_come_from_the_environment() {
     // the environment was read at all.
     let shell = script("trim-env-shell", &marker_shell(60));
     let out = out_path("trim-env");
-    let editor = script("trim-env-editor", &format!("cat > {}", out.display()));
+    let editor = script("trim-env-editor", &copy_editor(&out));
 
     let mut tumu = e2e::TumuHarness::with_args(24, 80, {
         let shell = shell.to_str().expect("utf-8 path").to_string();
@@ -152,10 +249,7 @@ fn the_cli_limit_overrides_the_environment() {
     // environment wins, it is gone. That the head is present is the assertion.
     let shell = script("trim-precedence-shell", &marker_shell(60));
     let out = out_path("trim-precedence");
-    let editor = script(
-        "trim-precedence-editor",
-        &format!("cat > {}", out.display()),
-    );
+    let editor = script("trim-precedence-editor", &copy_editor(&out));
 
     let mut tumu = e2e::TumuHarness::with_args(24, 80, {
         let shell = shell.to_str().expect("utf-8 path").to_string();

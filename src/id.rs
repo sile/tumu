@@ -21,6 +21,17 @@ impl SheetId {
     }
 }
 
+impl std::fmt::Display for SheetId {
+    /// Writes the bare number.
+    ///
+    /// An id is only ever shown to a person in a file name -- the one the
+    /// scrollback editor is opened on -- where the wrapper's name would be
+    /// noise. The number itself is what makes the name unique.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// Names the `termnix` session a sheet hosts.
 ///
 /// The name carries the dependency it comes from, because a session is not a

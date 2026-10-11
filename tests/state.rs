@@ -27,6 +27,15 @@ fn ctrl(c: char) -> KeyInput {
     key(true, KeyCode::Char(c))
 }
 
+/// Builds a session id from a plain number, for tests that only need an id.
+///
+/// A real id is a `NonZeroU64`, which is what makes "no session" unrepresentable
+/// rather than a sentinel; tests here do not care about the value, only that
+/// two ids can be told apart.
+fn session(n: u64) -> tumu::TermnixSessionId {
+    tumu::TermnixSessionId::new(std::num::NonZeroU64::new(n).expect("non-zero"))
+}
+
 fn state_with(rows: usize, cols: usize, sheets: usize) -> tumu::State {
     let mut state = tumu::State::new(size(rows, cols));
     // A resize over an empty stack spawns the first sheet; pushing the rest
@@ -124,15 +133,25 @@ fn the_new_sheet_command_stacks_a_sheet_on_top() {
     let actions = state.update(tumu::Event::Key(ch('n')));
 
     assert_eq!(state.stack.len(), 2);
-    assert_eq!(
-        actions.first(),
-        Some(&tumu::Action::SpawnSession { index: 0 })
+    assert!(
+        matches!(
+            actions.first(),
+            Some(&tumu::Action::SpawnSession {
+                index: 0,
+                program: tumu::Program::Shell
+            })
+        ),
+        "the first action spawns a shell in the new top sheet, got {actions:?}"
     );
 }
 
 #[test]
 fn the_close_sheet_command_drops_the_focused_sheet() {
     let mut state = state_with(24, 80, 2);
+    // Attach a session to the focused (top) sheet, so closing it has a session
+    // to name. A sheet whose session has not been spawned yet closes silently.
+    let top = session(7);
+    state.stack.attach_session(0, top);
     state.update(tumu::Event::Key(tumu::PREFIX));
 
     let actions = state.update(tumu::Event::Key(ch('x')));
@@ -140,7 +159,35 @@ fn the_close_sheet_command_drops_the_focused_sheet() {
     assert_eq!(state.stack.len(), 1);
     assert_eq!(
         actions.first(),
-        Some(&tumu::Action::CloseSession { index: 0 })
+        Some(&tumu::Action::CloseSession { session: top })
+    );
+}
+
+#[test]
+fn closing_a_sheet_names_the_session_it_closed_not_the_one_that_shifted_up() {
+    // The bug this guards: the session used to be named by the *index* of the
+    // sheet, resolved after the sheet was removed. Closing the top sheet would
+    // then name index 0, which is now the sheet that shifted up -- and the edge
+    // would close *that* sheet's session instead. Naming the session directly is
+    // what keeps the two apart.
+    let mut state = state_with(24, 80, 2);
+    let top = session(1);
+    let below = session(2);
+    state.stack.attach_session(0, top);
+    state.stack.attach_session(1, below);
+    state.update(tumu::Event::Key(tumu::PREFIX));
+
+    let actions = state.update(tumu::Event::Key(ch('x')));
+
+    assert_eq!(
+        actions.first(),
+        Some(&tumu::Action::CloseSession { session: top }),
+        "the closed session is the one that was focused, not the survivor"
+    );
+    assert_eq!(
+        state.stack.sheets()[0].1.session,
+        Some(below),
+        "the survivor keeps its session"
     );
 }
 
@@ -178,46 +225,94 @@ fn the_quit_command_sets_exit_and_returns_it() {
 }
 
 #[test]
-fn the_edit_scrollback_command_names_the_focused_sheet() {
+fn the_editor_opens_on_the_focused_sheets_session() {
     let mut state = state_with(24, 80, 2);
+    let session = session(7);
+    state.stack.attach_session(0, session);
 
     let actions = run_command(&mut state, 'l');
 
-    // The core names the sheet and stops: the scrollback belongs to the live
-    // session, which only the edge holds, so the action carries an index and
-    // not the text.
-    assert_eq!(actions, vec![tumu::Action::EditScrollback { index: 0 }]);
+    // The core names the session whose history to show and stops there: reading
+    // the text out of a terminal is the edge's, so the action carries the
+    // session and not the bytes. The editor sheet goes on top, so the action
+    // names row 0 as where its session belongs.
+    assert_eq!(
+        actions.first(),
+        Some(&tumu::Action::OpenEditor { index: 0, session })
+    );
 }
 
 #[test]
-fn editing_the_scrollback_leaves_the_stack_alone() {
+fn opening_the_editor_on_a_sheet_with_no_session_does_nothing() {
     let mut state = state_with(24, 80, 2);
+    let before = state.stack.len();
+
+    // A sheet with no session is one whose child has not been spawned yet, or
+    // has just exited. There is no history to read and no sheet worth adding,
+    // so the command is a no-op rather than an editor on an empty file.
+    let actions = run_command(&mut state, 'l');
+
+    assert!(actions.is_empty());
+    assert_eq!(state.stack.len(), before, "no sheet was added");
+}
+
+#[test]
+fn editing_the_scrollback_adds_a_focused_editor_sheet_on_top() {
+    let mut state = state_with(24, 80, 2);
+    let source = session(7);
+    state.stack.attach_session(0, source);
     let before: Vec<tumu::SheetId> = state.stack.sheets().iter().map(|(id, _)| *id).collect();
-    let focused = state.focused;
 
-    run_command(&mut state, 'l');
+    let actions = run_command(&mut state, 'l');
 
-    // Opening the scrollback is not a view of tumu's own: nothing on the stack
-    // moved, focus stayed put, and the loop is not asked to stop. The ids are
-    // compared, not the sheets: a sheet is told apart by its id, and the stack
-    // is what the command must not have touched.
-    let after: Vec<tumu::SheetId> = state.stack.sheets().iter().map(|(id, _)| *id).collect();
-    assert_eq!(after, before);
-    assert_eq!(state.focused, focused);
-    assert!(!state.full_screen);
-    assert!(!state.exit);
+    // The editor opens in a sheet of its own, pushed on top like any new sheet,
+    // and it takes the focus so the keyboard follows the editor in.
+    assert_eq!(
+        state.stack.len(),
+        before.len() + 1,
+        "the editor adds a sheet"
+    );
+    let editor_sheet = state.stack.sheets()[0].0;
+    assert!(
+        !before.contains(&editor_sheet),
+        "the top sheet is the new editor sheet"
+    );
+    assert_eq!(state.focused, Some(editor_sheet));
+    // The editor sheet names the scrollback to read and the program to run.
+    assert_eq!(
+        actions.first(),
+        Some(&tumu::Action::OpenEditor {
+            index: 0,
+            session: source
+        })
+    );
+    assert!(
+        actions.iter().any(|action| matches!(
+            action,
+            tumu::Action::SpawnSession {
+                index: 0,
+                program: tumu::Program::Editor { .. }
+            }
+        )),
+        "the editor sheet spawns the editor, got {actions:?}"
+    );
 }
 
 #[test]
 fn editing_the_scrollback_follows_focus() {
     let mut state = state_with(24, 80, 3);
-    // Focus the bottom sheet, so the index named is not the top of the stack.
+    // Focus the bottom sheet, so the session named is not the top of the stack.
     let bottom = state.stack.sheets()[2].0;
     state.focused = Some(bottom);
+    let session = session(9);
+    state.stack.attach_session(2, session);
 
     let actions = run_command(&mut state, 'l');
 
-    assert_eq!(actions, vec![tumu::Action::EditScrollback { index: 2 }]);
+    assert_eq!(
+        actions.first(),
+        Some(&tumu::Action::OpenEditor { index: 0, session })
+    );
 }
 
 #[test]
@@ -679,6 +774,8 @@ fn the_prefix_again_sends_the_prefix_and_closes_the_menu() {
 #[test]
 fn clicking_a_menu_row_runs_its_command_and_closes_the_menu() {
     let mut state = state_with(40, 80, 2);
+    // The focused sheet needs a session for closing it to name one.
+    state.stack.attach_session(0, session(1));
     state.update(tumu::Event::Key(tumu::PREFIX));
     let layout = state.menu_layout().expect("the menu fits 40x80");
 

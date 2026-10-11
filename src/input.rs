@@ -8,6 +8,14 @@
 
 use crate::Command;
 
+/// The stem of the file an editor sheet is opened on.
+///
+/// The core names the file the editor reads, but *where* it goes is the edge's
+/// business -- only the edge may touch the file system. So the core writes a
+/// bare name and the edge puts it in its own directory; this constant is what
+/// keeps the two halves of that convention in one place.
+pub const SCROLLBACK_FILE_PREFIX: &str = "tumu-scrollback";
+
 /// The key that arms the command latch.
 ///
 /// It is `C-q` for now: `C-o` is the prefix the README settles on, but `C-o`

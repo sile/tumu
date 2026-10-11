@@ -23,11 +23,13 @@
 //! line is appended. `prefix l` is what makes the bound matter: the scrollback
 //! it hands to an editor is only as large as the limit allows.
 //!
-//! One command leaves the loop for a moment: `prefix l` hands the focused
-//! sheet's scrollback to an external editor. That is the one place the edge
-//! gives the terminal up and takes it back, so the handover -- dropping the
-//! driver, running the child, building a fresh driver -- lives in
-//! [`App::edit_scrollback`] and nowhere else.
+//! `prefix l` opens the focused sheet's scrollback in an editor, and it does so
+//! by *adding a sheet*: the core assembles the text (it owns the model) and
+//! returns an [`OpenEditor`](tumu::Action::OpenEditor) naming the sheet, and the
+//! edge writes the text to a file and spawns the editor as that sheet's session.
+//! Nothing is handed over, so the driver is never dropped and the editor is
+//! painted like any other child. The one file the edge owns is unlinked when the
+//! editor exits, which [`reap_sessions`](App::reap_sessions) does.
 //!
 //! The loop is edge-triggered, following `termnix`'s contract: every session's
 //! pending work is drained with [`Session::needs_pump()`](termnix::Session::needs_pump)
@@ -38,8 +40,8 @@
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::io::{Read, Write};
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 /// How long to wait for the rest of an escape sequence before a lone `ESC` byte
 /// is treated as the Escape key.
@@ -82,13 +84,12 @@ impl ShellCommand {
     }
 }
 
-/// The program the scrollback is handed to.
+/// The program an editor sheet runs.
 ///
 /// This mirrors [`ShellCommand`]: the recipe is a program and its fixed flags,
-/// not a live [`Command`], so a fresh one is built for each launch. The editor
-/// is treated as opaque -- tumu writes the scrollback to its standard input and
-/// does not care how the editor reads it -- so the recipe fixes the program and
-/// the one flag the handoff relies on.
+/// not a live [`Command`], so a fresh one is built for each launch. The file to
+/// open is not part of the recipe -- it is made fresh per sheet -- so it is a
+/// parameter rather than a field.
 #[derive(Debug, Clone)]
 pub struct EditorCommand {
     program: PathBuf,
@@ -100,16 +101,17 @@ impl EditorCommand {
         Self { program }
     }
 
-    /// Builds a fresh [`Command`] that reads the scrollback from its input.
+    /// Builds a fresh [`Command`] that opens `path`.
     ///
-    /// The command is left with no standard streams set: the caller adds the
-    /// standard input pipe the scrollback is written to and lets the terminal
-    /// streams be inherited, which is the handover the editor needs. `--tail`
-    /// asks the editor to open at the end of that input, so the latest
-    /// scrollback is what it shows first.
-    pub fn command(&self) -> Command {
+    /// `--tail` asks the editor to open at the end of the file, so the newest
+    /// scrollback is what it shows first: the text is a history, and its last
+    /// line is where the reader left off. The path is passed positionally, after
+    /// the flag, because a trailing argument would otherwise be read as the file
+    /// the flag is about.
+    pub fn command(&self, path: &Path) -> Command {
         let mut command = Command::new(&self.program);
         command.arg("--tail");
+        command.arg(path);
         command
     }
 }
@@ -161,19 +163,30 @@ fn termnix_key(key: tuinix::KeyInput) -> termnix::KeyEvent {
 
 /// Owns the terminal edge and drives the core until every session is gone.
 pub struct App {
-    /// The terminal driver, or `None` while an external editor owns the
-    /// terminal.
+    /// The terminal driver.
     ///
-    /// It is an `Option` because the driver *is* the terminal takeover: to hand
-    /// the terminal to an editor, tumu has to drop it (which restores raw mode,
-    /// the alternate screen, and the cursor) and build a fresh one when the
-    /// editor returns. While it is `None` the poll loop still watches the
-    /// sessions, but nothing paints.
-    driver: Option<tuinix::TerminalDriver>,
+    /// Nothing hands the terminal over any more: an editor is a sheet's child
+    /// like any other, so the driver lives as long as the app does and raw mode
+    /// is entered once, at startup.
+    driver: tuinix::TerminalDriver,
     decoder: tuinix::InputDecoder,
     previous: Option<tuinix::Frame>,
     shell: ShellCommand,
     editor: EditorCommand,
+    /// Where the files an editor sheet opens are written.
+    ///
+    /// The core names a bare file name (see
+    /// [`SCROLLBACK_FILE_PREFIX`](tumu::SCROLLBACK_FILE_PREFIX)); this is the
+    /// directory the edge puts it in. Only the edge touches the file system, so
+    /// only the edge knows where the directory is.
+    editor_dir: PathBuf,
+    /// The file each editor session was opened on, so it can be removed when the
+    /// editor exits.
+    ///
+    /// The key is the *session*, not the sheet: by the time the child is reaped
+    /// the sheet that hosted it is being closed, so the sheet is no longer a
+    /// handle on the file. The map is the edge's half of the editor's lifetime.
+    editor_files: HashMap<tumu::TermnixSessionId, PathBuf>,
     state: tumu::State,
     sessions: HashMap<tumu::TermnixSessionId, termnix::Session>,
     next_session_id: std::num::NonZeroU64,
@@ -202,19 +215,27 @@ impl App {
     /// `scrollback` is how much history each session is allowed to keep; it is
     /// the bound the edge applies as sessions run, since `termnix` applies
     /// none itself.
+    ///
+    /// `editor_dir` is where an editor sheet's file is written. It is made up
+    /// front, before any sheet can ask for an editor, so the write cannot fail
+    /// on a missing directory.
     pub fn new(
         state: tumu::State,
         shell: ShellCommand,
         editor: EditorCommand,
         scrollback: tumu::ScrollbackLimit,
+        editor_dir: PathBuf,
     ) -> std::io::Result<Self> {
+        std::fs::create_dir_all(&editor_dir)?;
         let driver = take_terminal()?;
         let mut app = Self {
-            driver: Some(driver),
+            driver,
             decoder: tuinix::InputDecoder::new(),
             previous: None,
             shell,
             editor,
+            editor_dir,
+            editor_files: HashMap::new(),
             state,
             sessions: HashMap::new(),
             next_session_id: std::num::NonZeroU64::MIN,
@@ -231,19 +252,14 @@ impl App {
         Ok(app)
     }
 
-    /// The terminal driver, which is present except while an editor owns the
-    /// terminal.
+    /// The terminal driver.
     fn driver(&self) -> &tuinix::TerminalDriver {
-        self.driver
-            .as_ref()
-            .expect("the terminal is held except while an editor owns it")
+        &self.driver
     }
 
     /// The terminal driver, mutably.
     fn driver_mut(&mut self) -> &mut tuinix::TerminalDriver {
-        self.driver
-            .as_mut()
-            .expect("the terminal is held except while an editor owns it")
+        &mut self.driver
     }
 
     /// Runs the poll loop until the core asks to leave or no session is left.
@@ -375,9 +391,7 @@ impl App {
             if let Some(title) = title
                 && let Some(index) = self.index_for_session(id)
             {
-                let actions = self
-                    .state
-                    .update(tumu::Event::TitleChanged { index, title });
+                let actions = self.update_state(tumu::Event::TitleChanged { index, title });
                 self.dispatch(actions)?;
                 self.dirty = true;
             }
@@ -404,8 +418,17 @@ impl App {
                 continue;
             }
             self.sessions.remove(&id);
+            // The editor's temp file, if this session was one, goes with the
+            // session: nothing else knows the path, and the file is only ever
+            // read by the child that just exited. A failed removal is reported
+            // and swallowed, since the sheet still has to close.
+            if let Some(path) = self.editor_files.remove(&id)
+                && let Err(err) = std::fs::remove_file(&path)
+            {
+                eprintln!("tumu: editor file {}: {err}", path.display());
+            }
             if let Some(sheet_id) = self.sheet_for_session(id) {
-                let actions = self.state.update(tumu::Event::SessionExited(sheet_id));
+                let actions = self.update_state(tumu::Event::SessionExited(sheet_id));
                 self.dispatch(actions)?;
             }
             self.dirty = true;
@@ -586,11 +609,11 @@ impl App {
     fn handle_input(&mut self, input: tuinix::Input) -> std::io::Result<()> {
         match input {
             tuinix::Input::Key(key) => {
-                let actions = self.state.update(tumu::Event::Key(key));
+                let actions = self.update_state(tumu::Event::Key(key));
                 self.dispatch(actions)?;
             }
             tuinix::Input::Mouse(mouse) => {
-                let actions = self.state.update(tumu::Event::Mouse(mouse));
+                let actions = self.update_state(tumu::Event::Mouse(mouse));
                 self.dispatch(actions)?;
             }
             _ => {}
@@ -600,8 +623,18 @@ impl App {
 
     /// Reports a display size to the core and carries out what it returns.
     fn report_resize(&mut self, size: tuinix::Size) -> std::io::Result<()> {
-        let actions = self.state.update(tumu::Event::Resize(size));
+        let actions = self.update_state(tumu::Event::Resize(size));
         self.dispatch(actions)
+    }
+
+    /// Feeds one event to the core and returns the actions it answered with.
+    ///
+    /// The core takes nothing but the event: everything an action needs beyond
+    /// the model -- a session's scrollback, its grid -- is read by the edge,
+    /// which is the side that holds the sessions. So there is no second
+    /// argument to thread through, and no borrow of the app to split.
+    fn update_state(&mut self, event: tumu::Event) -> Vec<tumu::Action> {
+        self.state.update(event)
     }
 
     /// Carries out a batch of core actions.
@@ -611,13 +644,15 @@ impl App {
     fn dispatch(&mut self, actions: Vec<tumu::Action>) -> std::io::Result<()> {
         for action in actions {
             match action {
-                tumu::Action::SpawnSession { index } => self.spawn_session(index)?,
+                tumu::Action::SpawnSession { index, program } => {
+                    self.spawn_session(index, program)?;
+                }
                 tumu::Action::ResizeSession { index, size } => {
                     self.resize_session(index, size);
                 }
-                tumu::Action::CloseSession { index } => self.close_session(index),
+                tumu::Action::CloseSession { session } => self.close_session(session),
                 tumu::Action::SendToFocused { index, key } => self.send_to_focused(index, key),
-                tumu::Action::EditScrollback { index } => self.edit_scrollback(index)?,
+                tumu::Action::OpenEditor { index, session } => self.open_editor(index, session),
                 tumu::Action::PasteClipboard { index } => self.paste_clipboard(index),
                 tumu::Action::PrefixPending => {}
                 tumu::Action::Exit => self.exit = true,
@@ -629,9 +664,15 @@ impl App {
 
     /// Spawns a session for the sheet at `index` and attaches it.
     ///
-    /// The PTY is sized to the sheet's *content* region, the rows below the
-    /// title, so the title row never costs the child a row it cannot use.
-    fn spawn_session(&mut self, index: usize) -> std::io::Result<()> {
+    /// The PTY is sized to the sheet's *content* region, the rows before the
+    /// border, so the border line never costs the child a row it cannot use.
+    ///
+    /// What runs is the action's [`Program`](tumu::Program): the shell, or the
+    /// editor on a file the core named (and which
+    /// [`open_editor`](App::open_editor) has just written). The two share the
+    /// whole of this: a session is a session, and which child it is makes no
+    /// difference to how it is sized, attached, or painted.
+    fn spawn_session(&mut self, index: usize, program: tumu::Program) -> std::io::Result<()> {
         let Some(region) = self.state.region_of(index) else {
             return Ok(());
         };
@@ -641,15 +682,70 @@ impl App {
         else {
             return Ok(());
         };
-        let mut command = self.shell.command();
+        // The editor's file is named by the core and placed by this edge: the
+        // one join that turns the name into the path the child is handed, and
+        // the path the file is removed by later.
+        let mut editor_path = None;
+        let mut command = match &program {
+            tumu::Program::Shell => self.shell.command(),
+            tumu::Program::Editor { name } => {
+                let path = self.editor_dir.join(name);
+                editor_path = Some(path.clone());
+                self.editor.command(&path)
+            }
+        };
         let session = termnix::Session::new(&mut command, size)?;
         let id = tumu::TermnixSessionId::new(self.next_session_id);
         self.next_session_id = std::num::NonZeroU64::new(self.next_session_id.get() + 1)
             .expect("an id past the last used is non-zero");
+        if let Some(path) = editor_path {
+            // Remembered by session, because the sheet that names it is gone by
+            // the time the editor exits and the file has to be removed.
+            self.editor_files.insert(id, path);
+        }
         self.sessions.insert(id, session);
         self.state.stack.attach_session(index, id);
         self.dirty = true;
         Ok(())
+    }
+
+    /// Writes the scrollback of `session` to the file an editor sheet opens.
+    ///
+    /// The core named a bare file name (see [`tumu::SCROLLBACK_FILE_PREFIX`])
+    /// and the edge puts it in [`editor_dir`](App::editor_dir); the two halves
+    /// are joined here, which is why the path is not carried on the action. The
+    /// write is what makes the file exist before the spawn that reads it, and
+    /// the file is removed when the editor exits (see
+    /// [`reap_sessions`](App::reap_sessions)).
+    ///
+    /// Reading the text out of the session is the edge's because only the edge
+    /// holds it (see [`scrollback_text`](App::scrollback_text)); the core named
+    /// the session and nothing more. A session that is gone writes an empty
+    /// file, which reads as "no history" rather than as a refusal.
+    ///
+    /// A failure to write is reported and swallowed: the editor is still
+    /// spawned, on a file that does not exist, which an editor reports in its
+    /// own way. That is better than dropping the sheet, which would leave the
+    /// layout one sheet out of step with what the user asked for.
+    fn open_editor(&mut self, index: usize, session: tumu::TermnixSessionId) {
+        let Some(name) = self.editor_file_name(index) else {
+            return;
+        };
+        let text = self.scrollback_text(session).unwrap_or_default();
+        if let Err(err) = std::fs::write(self.editor_dir.join(&name), text) {
+            eprintln!("tumu: editor file {name}: {err}");
+        }
+    }
+
+    /// Returns the file name the editor of the sheet at `index` is opened on.
+    ///
+    /// The name is derived from the sheet's id, which is what makes it unique
+    /// for the life of the run: two editor sheets cannot collide, and the name
+    /// survives the sheet being reordered. The bare name is the core's half; the
+    /// directory is this edge's, added by the caller that touches the disk.
+    fn editor_file_name(&self, index: usize) -> Option<String> {
+        let (id, _) = self.state.stack.sheets().get(index)?;
+        Some(format!("{}-{id}.txt", tumu::SCROLLBACK_FILE_PREFIX))
     }
 
     /// Sends `key` to the session of the sheet at `index`.
@@ -735,11 +831,13 @@ impl App {
         }
     }
 
-    /// Closes the session hosted by the sheet at `index`.
-    fn close_session(&mut self, index: usize) {
-        if let Some(id) = self.session_at(index) {
-            self.sessions.remove(&id);
-        }
+    /// Closes the session with this id.
+    ///
+    /// The session is named by id, not by the index of a sheet: the core has
+    /// already removed the sheet from the stack, so an index would name whatever
+    /// sheet shifted into the gap.
+    fn close_session(&mut self, session: tumu::TermnixSessionId) {
+        self.sessions.remove(&session);
         self.dirty = true;
     }
 
@@ -755,14 +853,14 @@ impl App {
     /// Renders the state and writes only what changed to the terminal.
     ///
     /// The core draws the whole screen -- each visible sheet is a frame of its
-    /// own, composed into the screen -- and the grids it draws under each title
-    /// come from the sessions, which the core does not hold. So the edge hands
-    /// the core a [`tumu::SheetContents`], which is `App` itself (its
-    /// [`SheetContents::grid`](tumu::SheetContents::grid) answers "what does
-    /// sheet `index` show?" from `self.sessions`), and the core stays the one
-    /// place a frame is built.
+    /// own, composed into the screen -- and the grids it draws under each border
+    /// come from the sessions, which the core does not hold. So the edge walks
+    /// the stack once and collects one grid per sheet (see
+    /// [`sheet_grids`](App::sheet_grids)), in the order the core will ask for
+    /// them, and hands the collection over.
     fn render(&mut self) -> std::io::Result<()> {
-        let frame = tumu::frame(&self.state, self);
+        let grids = self.sheet_grids();
+        let frame = tumu::frame(&self.state, &grids);
         let cursor = self.focused_cursor();
         let out = frame.render(self.previous.as_ref(), cursor);
         self.driver_mut().write_all(&out)?;
@@ -805,93 +903,41 @@ impl App {
         })
     }
 
-    /// Hands the sheet's scrollback to the external editor.
+    /// Returns the grid the session shows, ready to be painted.
     ///
-    /// This is the copy-mode entry point: the scrollback of the sheet at
-    /// `index` -- the history the emulator has pushed off the top, followed by
-    /// the rows still on screen -- is turned into text and written to the
-    /// editor's standard input. The editor is launched as `kk --tail`, which
-    /// reads the text from the pipe and takes its keys from the controlling
-    /// terminal, so no temporary file is needed: the scrollback lives on the
-    /// pipe and is never written to disk.
+    /// A session that is not in the table has no grid: it was just closed, and
+    /// the sheet that hosted it is being reaped.
     ///
-    /// tumu owns the terminal, and the editor needs it, so the terminal is
-    /// handed over for the child's lifetime: the [`tuinix::TerminalDriver`] is
-    /// dropped (restoring raw mode, the alternate screen, and the cursor),
-    /// the child inherits the terminal on its own standard streams, and a fresh
-    /// driver is built once the child has exited. The fresh driver starts with
-    /// mouse reporting off, so it is re-requested the way startup requests it,
-    /// and the previous frame is thrown away, because the child painted over the
-    /// screen and a differential repaint against the old frame would skip rows
-    /// it thinks are still right. Rebuilding the driver and clearing the frame
-    /// is what makes the next paint a full one.
-    ///
-    /// A sheet with no session is left alone: there is nothing to read, so
-    /// there is nothing to open. The index is one of the core's own and always
-    /// names a sheet, so it is only the missing session that can stop this.
-    fn edit_scrollback(&mut self, index: usize) -> std::io::Result<()> {
-        let Some(text) = self.scrollback_text(index) else {
-            return Ok(());
-        };
+    /// The rows are collected into a `Vec`, because
+    /// [`Session`](termnix::Session) exposes its rows as an *iterator* of
+    /// borrowed slices rather than a slice. The cells are still borrowed, so the
+    /// grid is cheap and the session's memory is never copied; the `Vec` is
+    /// rebuilt per frame, which is fine at this size.
+    fn grid_of(&self, id: tumu::TermnixSessionId) -> Option<tumu::SheetGrid<'_>> {
+        let session = self.sessions.get(&id)?;
+        let terminal = session.terminal_state();
+        Some(tumu::SheetGrid {
+            rows: terminal.rows().collect(),
+            cursor: terminal.cursor(),
+            cursor_visible: terminal.modes().cursor_visible,
+        })
+    }
 
-        // Give the terminal back before the child starts, and take it again
-        // after: the two brackets are the whole of the handover.
-        self.driver = None;
-        let status = self.run_editor(&text);
-        self.driver = Some(take_terminal()?);
-        // A fresh driver starts with mouse reporting off, so it is re-requested
-        // here exactly as at startup. It is a convenience, not a requirement,
-        // so a refusal is swallowed rather than fatal.
-        let _ = self.driver_mut().enable_mouse_reporting();
-        // The child painted over the screen, so the old frame is not a valid
-        // baseline for a differential repaint: dropping it forces a full one.
-        self.previous = None;
-        self.dirty = true;
-
-        // The editor's exit code is not tumu's to act on -- the scrollback is
-        // not written back -- so a failure to launch or wait is reported and
-        // swallowed. The sheet is unchanged either way, and the user is back in
-        // tumu with the stack intact.
-        if let Err(err) = status {
-            eprintln!("tumu: editor: {err}");
+    /// Collects what every sheet shows, in stack order.
+    ///
+    /// One entry per sheet, so the position in the collection is the sheet and
+    /// the core never has to look a sheet's session up to know which grid is
+    /// its. A sheet with no session -- one whose child has not been spawned yet,
+    /// or has exited -- contributes `None`, which draws its border alone.
+    fn sheet_grids(&self) -> tumu::SheetGrids<'_> {
+        let mut grids = tumu::SheetGrids::new();
+        for (_, sheet) in self.state.stack.sheets() {
+            grids.push(sheet.session.and_then(|id| self.grid_of(id)));
         }
-        Ok(())
+        grids
     }
 
-    /// Runs the external editor on `text`, feeding it on standard input.
-    ///
-    /// The write happens on its own thread so a scrollback larger than the pipe
-    /// buffer cannot deadlock the wait: the child drains the pipe as it reads its
-    /// input, and this thread blocks only until the last byte is handed over.
-    /// The child inherits tumu's standard streams -- the terminal, since the
-    /// driver was dropped first -- so it can take its keys from the terminal and
-    /// paint its own UI. Its standard input is the pipe instead, which is the
-    /// text it is asked to read.
-    fn run_editor(&self, text: &str) -> std::io::Result<std::process::ExitStatus> {
-        let mut child = self.editor.command().stdin(Stdio::piped()).spawn()?;
-
-        let mut stdin = child
-            .stdin
-            .take()
-            .expect("stdin was requested as a pipe, so it is present");
-        let bytes = text.as_bytes().to_vec();
-        let writer = std::thread::spawn(move || {
-            // A short write is fine only when the child stopped reading; there
-            // is nothing left to do about it from here, so the error is dropped
-            // and the child's exit status is what the caller sees.
-            let _ = stdin.write_all(&bytes);
-            // Dropping `stdin` closes the write end, which is the EOF the child
-            // waits for.
-        });
-
-        let status = child.wait();
-        // The child cannot exit before its input is closed, but joining here
-        // keeps the thread from outliving the call if it ever could.
-        let _ = writer.join();
-        status
-    }
-
-    /// Builds the text of the sheet's scrollback: history first, then the rows
+    /// Returns the text of the sheet's scrollback: history first, then the rows
     /// still on screen.
     ///
     /// The two halves come from the same emulator but are laid out
@@ -902,11 +948,14 @@ impl App {
     /// width-0 cell (the trailing half of a wide glyph) contributes nothing of
     /// its own.
     ///
-    /// Returns `None` when the sheet has no session to read from, so there is
+    /// This is what `prefix l` writes out. It lives on the *edge* rather than in
+    /// the core because reading it needs the session, which only the edge holds;
+    /// the core names the session and never sees a `termnix` type for it.
+    ///
+    /// Returns `None` when the session is not one this app holds, so there is
     /// nothing to open.
-    fn scrollback_text(&self, index: usize) -> Option<String> {
-        let session_id = self.session_at(index)?;
-        let session = self.sessions.get(&session_id)?;
+    fn scrollback_text(&self, id: tumu::TermnixSessionId) -> Option<String> {
+        let session = self.sessions.get(&id)?;
         let terminal = session.terminal_state();
 
         let mut rows: Vec<String> = Vec::new();
@@ -917,30 +966,6 @@ impl App {
             rows.push(row_text(row));
         }
         Some(rows.join("\n"))
-    }
-}
-
-impl tumu::SheetContents for App {
-    /// Returns the grid a sheet shows, as the core's [`SheetContents`] sees it.
-    ///
-    /// A sheet with no session, or one the full screen hides, has no grid: a
-    /// hidden sheet's region is empty, so the core never asks for it, and a sheet
-    /// without a session has nothing to show.
-    ///
-    /// The rows are collected into a `Vec` per call, because
-    /// [`Session`](termnix::Session) exposes its rows as an *iterator* of
-    /// borrowed slices rather than a slice. The cells are still borrowed, so the
-    /// grid is cheap and the session's memory is never copied; the `Vec` is
-    /// rebuilt per frame, which is fine at this size.
-    fn grid(&self, index: usize) -> Option<tumu::SheetGrid<'_>> {
-        let session_id = self.session_at(index)?;
-        let session = self.sessions.get(&session_id)?;
-        let terminal = session.terminal_state();
-        Some(tumu::SheetGrid {
-            rows: terminal.rows().collect(),
-            cursor: terminal.cursor(),
-            cursor_visible: terminal.modes().cursor_visible,
-        })
     }
 }
 
@@ -989,4 +1014,49 @@ fn poll_fds(fds: &mut [libc::pollfd], timeout: libc::c_int) -> libc::c_int {
 /// closes; it is the normal way to learn a child has exited, not a failure.
 fn is_child_gone(err: &std::io::Error) -> bool {
     err.raw_os_error() == Some(libc::EIO)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Builds a cell with a glyph, its display width, and default style.
+    fn cell(ch: char, width: u8) -> termnix::Cell {
+        termnix::Cell {
+            ch,
+            width,
+            ..termnix::Cell::EMPTY
+        }
+    }
+
+    #[test]
+    fn row_text_skips_the_trailing_half_of_a_wide_glyph() {
+        // A wide glyph occupies two cells: the glyph cell and a width-0 cell
+        // that stands for its right half. Only the glyph cell contributes, so
+        // the row reads as one character, not two.
+        let cells = [cell('世', 2), cell('\0', 0)];
+        assert_eq!(row_text(&cells), "世");
+    }
+
+    #[test]
+    fn row_text_trims_trailing_blanks() {
+        // A row padded to the terminal's width reads as the line it holds: the
+        // trailing spaces a full-width row carries are not part of the text.
+        let cells = [cell('h', 1), cell('i', 1), cell(' ', 1), cell(' ', 1)];
+        assert_eq!(row_text(&cells), "hi");
+    }
+
+    #[test]
+    fn row_text_keeps_interior_blanks() {
+        // Only *trailing* blanks are trimmed: a gap between words is content,
+        // and turning it into no gap at all would join the words.
+        let cells = [cell('a', 1), cell(' ', 1), cell('b', 1)];
+        assert_eq!(row_text(&cells), "a b");
+    }
+
+    #[test]
+    fn row_text_of_all_blanks_is_empty() {
+        let cells = [cell(' ', 1), cell(' ', 1)];
+        assert_eq!(row_text(&cells), "");
+    }
 }

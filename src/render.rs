@@ -20,10 +20,15 @@
 //!
 //! A sheet's *contents* are the grid of a live [`Session`](termnix::Session),
 //! which the core does not hold, so [`frame()`] takes them as a parameter: a
-//! [`SheetContents`] the edge implements over its sessions. The core asks which
-//! grid a sheet shows and paints it; it never reads a session itself. `()`, which
-//! answers `None` for every index, draws the chrome alone: that is what a test
-//! that only cares about the titles passes.
+//! [`SheetGrids`] the edge fills in from its sessions. The core asks which grid
+//! a sheet shows and paints it; it never reads a session itself. An empty
+//! [`SheetGrids`] draws the chrome alone, which is what a test that only cares
+//! about the layout passes.
+//!
+//! [`SheetGrids`] is a plain collection rather than a trait because there is
+//! only ever one source of grids -- the edge's sessions -- so an interface to
+//! abstract over would have no second implementation to justify it. The edge
+//! fills the collection in and hands it over; a test fills it in by hand.
 
 use crate::State;
 
@@ -56,32 +61,50 @@ pub struct SheetGrid<'a> {
     pub cursor_visible: bool,
 }
 
-/// A source of sheet grids, one per sheet index.
+/// What every sheet shows, one entry per sheet, in stack order.
 ///
-/// The grid of a sheet is the visible state of a live
+/// The contents of a sheet are the visible state of a live
 /// [`Session`](termnix::Session), which the core does not own, so [`frame()`]
 /// takes one of these instead of reaching for the sessions itself. The edge
-/// answers from its session table; a test can answer from a literal. Answering
-/// `None` for every index is a valid contents source, and draws the chrome
-/// with no contents under it.
-pub trait SheetContents {
-    /// Returns the grid shown by the sheet at `index`, or `None` if it has none.
-    fn grid(&self, index: usize) -> Option<SheetGrid<'_>>;
+/// builds it from its session table; a test can build it from literals.
+///
+/// It is positional -- entry `i` is what sheet `i` shows -- rather than a
+/// lookup keyed by session, because the caller that has the grids is the caller
+/// that painted the stack and so already walked it in stack order. A `None`
+/// entry is a sheet with nothing to draw under its border, which is what a
+/// sheet with no session looks like.
+#[derive(Default)]
+pub struct SheetGrids<'a> {
+    /// One entry per sheet, in stack order.
+    grids: Vec<Option<SheetGrid<'a>>>,
 }
 
-impl SheetContents for () {
-    /// Answers `None` for every sheet: the chrome with nothing under it.
-    fn grid(&self, _index: usize) -> Option<SheetGrid<'_>> {
-        None
+impl<'a> SheetGrids<'a> {
+    /// Returns an empty set: the chrome and nothing under it.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Adds the grid for the next sheet, in stack order.
+    ///
+    /// Call once per sheet, top to bottom, so the position of the call is the
+    /// sheet the grid belongs to and no index has to be passed or checked.
+    pub fn push(&mut self, grid: Option<SheetGrid<'a>>) {
+        self.grids.push(grid);
+    }
+
+    /// Returns the grid the sheet at `index` shows, if there is one.
+    pub fn grid(&self, index: usize) -> Option<&SheetGrid<'a>> {
+        self.grids.get(index)?.as_ref()
     }
 }
 
 /// Paints one sheet's grid into a sheet frame, from its top-left corner.
 ///
-/// The frame is the sheet's *content* frame, one row shorter than the sheet, so
-/// the title row above it is left alone. Cells past the frame's right edge or
-/// below its last row are dropped, so a grid larger than its frame is clipped
-/// rather than spilling onto a neighbour.
+/// The frame is the sheet's *content* frame, one line shorter than the sheet, so
+/// the border after it is left alone. Cells past the frame's right edge or below
+/// its last row are dropped, so a grid larger than its frame is clipped rather
+/// than spilling onto a neighbour.
 pub fn draw_sheet_grid(frame: &mut tuinix::Frame, grid: &SheetGrid) {
     let size = frame.size();
     for (row, cells) in grid.rows.iter().enumerate() {
@@ -188,10 +211,10 @@ pub fn sheet_content_origin(_orientation: crate::Orientation) -> tuinix::Positio
 /// screen on another) has an empty region and is skipped whole.
 ///
 /// The contents are the grids of the live sessions, which the core does not
-/// own, so they arrive through `contents`. A sheet the source answers `None`
-/// for is drawn as its title row alone, which is what a sheet with no session
-/// looks like.
-pub fn frame(state: &State, contents: &impl SheetContents) -> tuinix::Frame {
+/// own, so they arrive through `contents`, keyed by the session a sheet hosts.
+/// A sheet the caller has no grid for is drawn as its border alone, which is
+/// what a sheet with no session looks like.
+pub fn frame(state: &State, contents: &SheetGrids) -> tuinix::Frame {
     let mut screen = tuinix::Frame::new(state.size);
     let focused = state.focused_index();
     let orientation = state.orientation();
@@ -206,7 +229,7 @@ pub fn frame(state: &State, contents: &impl SheetContents) -> tuinix::Frame {
         let mut sheet_frame = sheet_frame(sheet, region.size, focused == Some(index), orientation);
         if let Some(grid) = contents.grid(index) {
             let mut content = tuinix::Frame::new(sheet_content_size(region.size, orientation));
-            draw_sheet_grid(&mut content, &grid);
+            draw_sheet_grid(&mut content, grid);
             // The content frame sits at the sheet's own corner; the border is
             // the line left over at the far end of the axis.
             sheet_frame.put_frame(sheet_content_origin(orientation), &content);

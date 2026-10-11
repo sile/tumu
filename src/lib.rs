@@ -34,7 +34,7 @@ mod sheet;
 mod stack;
 mod state;
 
-pub use action::Action;
+pub use action::{Action, Program};
 pub use command::Command;
 pub use event::Event;
 pub use geometry::{
@@ -42,14 +42,14 @@ pub use geometry::{
     terminal_size_to_cell_size,
 };
 pub use id::{SheetId, TermnixSessionId};
-pub use input::{BINDINGS, Binding, PREFIX};
+pub use input::{BINDINGS, Binding, PREFIX, SCROLLBACK_FILE_PREFIX};
 pub use menu::{MenuLayout, MenuRow, SEND_PREFIX_LABEL, chord_text, menu_layout};
 pub use orientation::{
     DEFAULT_CELL_ASPECT, Orientation, orientation, orientation_with_default_factor,
 };
 pub use ratio::Ratio;
 pub use render::{
-    SheetContents, SheetGrid, draw_sheet_grid, frame, menu_frame, sheet_content_origin,
+    SheetGrid, SheetGrids, draw_sheet_grid, frame, menu_frame, sheet_content_origin,
     sheet_content_size, sheet_frame,
 };
 pub use scrollback::{DEFAULT_CELLS, DEFAULT_LINES, ScrollbackLimit};
