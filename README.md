@@ -248,3 +248,12 @@ screen is not there to point at.
 Only the left button does something so far. Nothing is forwarded to the
 programs running in the sheets -- a click belongs to tumu -- so a fuller mouse
 (giving a sheet its own report when it wants one) is still open.
+
+Known issues
+------------
+
+- A sheet whose `prefix l` editor fails to launch (a `$TUMU_EDITOR` that is
+  missing, not executable, or does not accept `--tail`) stays in the stack as an
+  empty sheet and cannot be closed by typing to it, because it has no child to
+  type to. It is closed like any other sheet, with `prefix x`.
+
