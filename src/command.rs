@@ -22,10 +22,9 @@ pub enum Command {
     ///
     /// "Next" is the step along the stacking axis, in the direction the stack
     /// advances: the sheet *below* when the stack runs vertically, the sheet to
-    /// the *right* when it runs horizontally. The step is one place, not a
-    /// wrap: at the bottom (or the right) end of the stack it does nothing,
-    /// rather than run around to the top, so focus never moves somewhere the
-    /// user was not looking.
+    /// the *right* when it runs horizontally. The step wraps: at the bottom (or
+    /// the right) end of the stack it comes around to the top, so repeated
+    /// steps cycle through every sheet rather than stopping at an end.
     ///
     /// Focus is what this moves, not the sheets: the stack keeps its order and
     /// every region keeps its shape, so there is nothing to resize and no
@@ -38,8 +37,8 @@ pub enum Command {
     ///
     /// The inverse step of [`FocusNext`](Command::FocusNext): the sheet
     /// *above* in a vertical stack, the one to the *left* in a horizontal one.
-    /// It is a plain step for the same reason -- one place, no wrap, nothing
-    /// resized.
+    /// It wraps for the same reason -- from the top it comes around to the
+    /// bottom -- and resizes nothing.
     FocusPrevious,
 
     /// Move the focused sheet to the bottom, bringing the next one up.

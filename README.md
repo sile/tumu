@@ -212,10 +212,10 @@ moving away.
 `prefix n` and `prefix p` move the focus one place along the stack, in the
 direction the stack advances: `n` is *next* (down when the sheets run down the
 screen, right when they run across it) and `p` is *previous* (up / left). The
-step does not wrap -- at either end of the stack it does nothing -- and it moves
-only the keyboard: the stack keeps its order, so nothing is resized. `c` is
-*create* rather than the more usual `n` for a new sheet, because `n` is the step
-downwards.
+step wraps -- from either end of the stack it comes around to the other, so
+repeated steps cycle through every sheet -- and it moves only the keyboard: the
+stack keeps its order, so nothing is resized. `c` is *create* rather than the
+more usual `n` for a new sheet, because `n` is the step downwards.
 
 `prefix z` is a view, not a rearrangement: the focused sheet fills the
 terminal while the others keep their places, and clearing the flag brings the

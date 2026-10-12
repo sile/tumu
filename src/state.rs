@@ -570,11 +570,11 @@ impl State {
     /// that order -- so the two commands are one handler with a sign rather
     /// than one per axis.
     ///
-    /// The step stops at the ends of the stack: it lands on a sheet only when
-    /// there is one there, so at the bottom `prefix n` and at the top
-    /// `prefix p` leave the focus where it is. Nothing runs around to the other
-    /// end, because a wrap would move the keyboard to a sheet the user was not
-    /// stepping towards.
+    /// The step wraps at the ends of the stack, so the two commands cycle
+    /// through it: at the bottom `prefix n` comes around to the top, and at the
+    /// top `prefix p` comes around to the bottom. The count is the number of
+    /// sheets, so the wrapped index is always a real place -- with one sheet the
+    /// step lands back on it.
     ///
     /// The focused index is the anchor, not the focused [`SheetId`](crate::SheetId):
     /// stepping is a move to the *next place* in the stack, and reading the
@@ -588,9 +588,15 @@ impl State {
         let Some(index) = self.focused_index() else {
             return Vec::new();
         };
-        let Some(next) = index.checked_add_signed(step) else {
+        let count = self.stack.len();
+        if count == 0 {
             return Vec::new();
-        };
+        }
+        // Wrap rather than clamp: move by `step` around the ring of `count`
+        // places, keeping the result in `0..count`. `rem_euclid` folds a
+        // negative step (from the top, `p`) to the far end and a step past the
+        // bottom (`n`) back to the start, which is the whole of the wrap.
+        let next = (index as isize + step).rem_euclid(count as isize) as usize;
         if let Some((id, _)) = self.stack.sheets().get(next) {
             self.focused = Some(*id);
         }

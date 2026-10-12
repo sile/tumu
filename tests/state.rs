@@ -315,22 +315,58 @@ fn the_focus_previous_command_steps_up_the_stack() {
 }
 
 #[test]
-fn a_focus_step_stops_at_the_ends_of_the_stack() {
-    // The step does not wrap: on the top sheet `p` stays there, and on the
-    // bottom `n` stays there, because a wrap would move the keyboard to a
-    // sheet the user was not stepping towards.
+fn a_focus_step_wraps_at_the_ends_of_the_stack() {
+    // The step wraps, so the keyboard cycles through the stack: `p` on the top
+    // sheet comes around to the bottom, and `n` on the bottom comes around to
+    // the top. Nothing stops at an end, so no sheet is unreachable by stepping.
     let mut state = state_with(24, 80, 3);
     let top = state.stack.sheets()[0].0;
     let bottom = state.stack.sheets()[2].0;
 
-    // `p` from the top is a no-op.
+    // `p` from the top wraps to the bottom.
+    assert_eq!(state.focused, Some(top), "start on the top");
     run_command(&mut state, 'p');
-    assert_eq!(state.focused, Some(top));
+    assert_eq!(state.focused, Some(bottom), "`p` from the top wraps");
 
-    // Walk down to the bottom, then `n` there is a no-op.
-    state.focused = Some(bottom);
+    // `n` from the bottom wraps to the top.
     run_command(&mut state, 'n');
-    assert_eq!(state.focused, Some(bottom));
+    assert_eq!(state.focused, Some(top), "`n` from the bottom wraps");
+}
+
+#[test]
+fn stepping_around_the_stack_reaches_every_sheet() {
+    // Three sheets, three `n` steps: each lands on a different sheet, and the
+    // third returns to the one the first started from. That is what the wrap is
+    // for -- the whole stack is reachable by holding the step key.
+    let mut state = state_with(24, 80, 3);
+    let start = state.focused;
+    assert_eq!(state.stack.len(), 3);
+
+    let mut seen = std::collections::BTreeSet::new();
+    let mut third = None;
+    for step in 0..3 {
+        run_command(&mut state, 'n');
+        seen.insert(state.focused);
+        if step == 2 {
+            third = state.focused;
+        }
+    }
+
+    assert_eq!(seen.len(), 3, "three steps visit three sheets");
+    assert_eq!(third, start, "the third step returns to the start");
+}
+
+#[test]
+fn a_focus_step_on_one_sheet_lands_back_on_it() {
+    // A single sheet is a ring of one, so the wrap keeps focus where it is
+    // rather than stepping off the stack.
+    let mut state = state_with(24, 80, 1);
+    let only = state.stack.sheets()[0].0;
+
+    run_command(&mut state, 'n');
+    assert_eq!(state.focused, Some(only));
+    run_command(&mut state, 'p');
+    assert_eq!(state.focused, Some(only));
 }
 
 #[test]
