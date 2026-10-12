@@ -9,17 +9,17 @@
 //! Keys reach the core as [`Event::Key`](tumu::Event::Key): a key the prefix
 //! latch does not claim is forwarded to the focused sheet's session, and a
 //! latched key runs a command. Mouse reports reach it as
-//! [`Event::Mouse`](tumu::Event::Mouse), which is how a click moves focus -- and
-//! moving focus is *all* the mouse does, in tumu and in the core: a click runs no
-//! command, and nothing about one is remembered. Paste and undecodable input are
-//! drained but not yet acted on.
+//! [`Event::Mouse`](tumu::Event::Mouse): a report that lands in the focused
+//! sheet's child -- a child that asked for the mouse with a DECSET mode -- is
+//! forwarded to it, and any other report only moves the focus. Paste and
+//! undecodable input are drained but not yet acted on.
 //!
-//! The mouse also follows the focus in a second sense: a child that asks for the
-//! mouse with a DECSET mode is asking for reports tumu is presently consuming
-//! itself. The ask is read back from the session once per drain and after every
-//! event ([`settle_focus`](App::settle_focus)) and kept on the state as
+//! Which of the two a report is *is* read off the focus: a child that asks for
+//! the mouse with a DECSET mode is asking for reports that land in its own region.
+//! The ask is read back from the session once per drain and after every event
+//! ([`settle_focus`](App::settle_focus)) and kept on the state as
 //! [`Event::MouseWanted`](tumu::Event::MouseWanted), so the state says which of
-//! the two the focused sheet is in. Reporting is not handed over yet.
+//! the two the focused sheet is in.
 //!
 //! The edge also owns the clipboard. A child's OSC 52 copy arrives as
 //! [`termnix::Event::RequestReceived`] with a `SetClipboard`; the edge forwards

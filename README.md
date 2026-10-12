@@ -296,11 +296,16 @@ The mouse has one owner at a time, and which one is the focused sheet's child:
   There, a click is tumu's, and the one thing it does is move the focus to the
   sheet it landed on.
 - A sheet whose program **has** asked (a pager, an editor, `tmux` inside a sheet)
-  gets every report, and no report moves the focus while it does: a program
-  tracking the mouse is tracking it inside its own grid, so a click on the sheet
-  it runs in is a click on *it*, not a request to go elsewhere. The report is
-  clipped into the child's grid, and its coordinates are the child's own, not the
-  screen's.
+  gets every report that lands in its own region, and such a report moves no
+  focus: a program tracking the mouse is tracking it inside its own grid, so a
+  click on the sheet it runs in is a click on *it*, not a request to go
+  elsewhere. The report is clipped into the child's grid, and its coordinates are
+  the child's own, not the screen's.
+- A report that lands **outside** the focused sheet's region is tumu's even while
+  that child is asking: the child's grid is the whole of what it can have a
+  report about, so a click on a neighbour is a click on tumu's chrome, and it
+  moves the focus there. That is how the user leaves a tracking program -- point
+  at the sheet they want and click.
 
 The switch is the program's own mode, the one it sets with a DECSET escape
 sequence; tumu only reads it back and follows it. Nothing is configured, and the
@@ -310,8 +315,10 @@ follows the focus the way the keyboard does: there is one pointer and one focuse
 sheet.
 
 Dragging works: tumu remembers which button it forwarded a press for, so a drag
-names the button the child is holding. A click that only moved the focus leaves
-nothing behind for a later drag to continue.
+names the button the child is holding. A drag that began on a tracking child keeps
+going to it even if it wanders outside the region -- the gesture started on the
+program and has to stay with it. A click that only moved the focus leaves nothing
+behind for a later drag to continue.
 
 Only the left button moves the focus, and only a press at that. A click runs no
 command: the [menu](#menu) is opened by the prefix and chosen with a key, so a
@@ -324,9 +331,9 @@ Known issues
   missing, not executable, or does not accept `--tail`) stays in the stack as an
   empty sheet and cannot be closed by typing to it, because it has no child to
   type to. It is closed like any other sheet, with `prefix x`.
-- Only the *focused* sheet's reports are forwarded. A sheet whose child asked for
-  the mouse is the one `prefix n`/`o`/`x` and a click move the focus to, so a
-  background sheet gets nothing while it is not focused -- the same as the
-  keyboard. The mode is not remembered per sheet: leaving and returning re-reads
-  it from the child, which still has it set.
+- Only the *focused* sheet's reports are forwarded. A background sheet gets
+  nothing while it is not focused -- the same as the keyboard -- even if its
+  child asked for the mouse, so a tracking program in a background sheet does not
+  see a drag that started there. The mode is not remembered per sheet: leaving
+  and returning re-reads it from the child, which still has it set.
 

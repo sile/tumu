@@ -1019,15 +1019,15 @@ fn the_focused_sheets_child_asking_for_the_mouse_is_recorded() {
 }
 
 #[test]
-fn a_child_that_asked_for_the_mouse_gets_the_report_instead_of_the_focus() {
+fn a_child_that_asked_for_the_mouse_gets_a_report_inside_its_own_region() {
     let mut state = state_with(24, 80, 2);
     state.update(tumu::Event::MouseWanted(true));
 
-    // The click is in the sheet *below*, which the focus path would have moved
-    // to. With the child asking, it is the child's report instead and the focus
-    // stays where it is: a program tracking the mouse is tracking it inside its
-    // own grid, so a click on the sheet is a click on the program.
-    let actions = state.update(tumu::Event::Mouse(click(5, 60)));
+    // The click is inside the focused sheet (the top one, columns 0..40). With
+    // the child asking, it is the child's report and the focus stays where it
+    // is: a program tracking the mouse is tracking it inside its own grid, so a
+    // click on the sheet it runs in is a click on the program.
+    let actions = state.update(tumu::Event::Mouse(click(5, 10)));
 
     assert_eq!(state.focused, Some(state.stack.sheets()[0].0));
     assert!(
@@ -1040,6 +1040,50 @@ fn a_child_that_asked_for_the_mouse_gets_the_report_instead_of_the_focus() {
             }]
         ),
         "the report goes to the focused sheet: {actions:?}"
+    );
+}
+
+#[test]
+fn a_click_outside_a_mouse_tracking_child_moves_the_focus_instead() {
+    let mut state = state_with(24, 80, 2);
+    state.update(tumu::Event::MouseWanted(true));
+
+    // The click is in the sheet *below* (columns 40..80), which is outside the
+    // focused child's region. The child's grid is the whole of what it can have
+    // a report about, so a click on its neighbour is tumu's: the focus moves and
+    // nothing is forwarded. This is how the user leaves a tracking program.
+    let actions = state.update(tumu::Event::Mouse(click(5, 60)));
+
+    assert_eq!(state.focused, Some(state.stack.sheets()[1].0));
+    assert!(actions.is_empty(), "nothing is forwarded: {actions:?}");
+}
+
+#[test]
+fn a_drag_that_leaves_a_mouse_tracking_child_still_reaches_it() {
+    let mut state = state_with(24, 80, 2);
+    state.update(tumu::Event::MouseWanted(true));
+
+    // A press inside the focused region arms the child's button; the drag that
+    // follows may wander outside the region, and it is still the child's -- a
+    // gesture that started on the program has to keep going to it.
+    state.update(tumu::Event::Mouse(click(5, 10)));
+    let actions = state.update(tumu::Event::Mouse(mouse(
+        tuinix::MouseInputKind::Drag,
+        5,
+        60,
+    )));
+
+    assert_eq!(state.focused, Some(state.stack.sheets()[0].0));
+    assert!(
+        matches!(
+            actions.as_slice(),
+            [tumu::Action::SendMouseToFocused {
+                index: 0,
+                held: Some(tuinix::MouseInputKind::LeftPress),
+                ..
+            }]
+        ),
+        "the drag stays with the child that saw the press: {actions:?}"
     );
 }
 

@@ -81,11 +81,14 @@ pub struct State {
     /// the focus changes and reports the change as
     /// [`Event::MouseWanted`](crate::Event::MouseWanted).
     ///
-    /// While it is set, a mouse report is the child's and is forwarded to it;
-    /// while it is clear, a report is tumu's own and only moves the focus. That
-    /// is the whole of the handover: the host terminal's reporting never changes,
-    /// because the one thing on the other side of it -- the focused sheet's child
-    /// -- changes what it does with a report instead.
+    /// While it is set, a mouse report that lands in the focused sheet's region
+    /// is the child's and is forwarded to it -- as is any report once a forwarded
+    /// press has armed a button, so a drag keeps going to the child that saw the
+    /// press. A report that lands outside the region is tumu's own and only moves
+    /// the focus, whether or not the child asked. That is the whole of the
+    /// handover: the host terminal's reporting never changes, because the one
+    /// thing on the other side of it -- the focused sheet's child -- changes what
+    /// it does with a report instead.
     pub mouse_wanted: bool,
 
     /// The mouse button the core believes is held down, if any.
@@ -234,20 +237,31 @@ impl State {
     /// Routes a mouse report: to the focused sheet's child, or to the focus.
     ///
     /// Which one it is is [`mouse_wanted`](State::mouse_wanted): a child that
-    /// asked for the mouse with a DECSET mode gets every report, and no report
-    /// moves the focus while it does -- a program that tracks the mouse is
-    /// tracking it inside its own grid, and a click on the sheet it runs in is a
-    /// click on *it*, not a request to focus something else. A child that has not
-    /// asked gets nothing; there, the one gesture tumu answers is a left press,
-    /// which moves the focus to the sheet it landed on.
+    /// asked for the mouse with a DECSET mode gets a report that lands in its
+    /// own region, and such a report does not move the focus -- a program that
+    /// tracks the mouse is tracking it inside its own grid, and a click on the
+    /// sheet it runs in is a click on *it*, not a request to focus something
+    /// else. A child that has not asked gets nothing; there, the one gesture
+    /// tumu answers is a left press, which moves the focus to the sheet it
+    /// landed on.
     ///
-    /// The report is forwarded to the *focused* sheet whatever it landed on.
-    /// That is the same rule the keyboard follows, and it is the only rule that
-    /// makes sense for a child: the pointer it sees is its own, and a sheet that
-    /// is not focused has no child waiting to hear about one. A click outside the
-    /// focused sheet's region is the child's to make sense of -- a terminal mouse
-    /// protocol has no coordinates outside the grid, so the edge clips it into
-    /// the grid rather than dropping it.
+    /// A report that lands *outside* the focused sheet's region is tumu's own,
+    /// even while the focused child is asking for the mouse: the child's grid is
+    /// the whole of what it can have a report about, and a click on another
+    /// sheet is a click on tumu's chrome, not on the child. So a click on a
+    /// neighbour moves the focus to it, which is what lets the user leave a
+    /// mouse-tracking program (a pager, an editor) by clicking the sheet they
+    /// want instead. The one exception is a report that continues a press the
+    /// child already saw: a held button keeps the report, wherever it lands, so
+    /// a drag that starts in the region and leaves it is still the child's.
+    ///
+    /// Inside the region, a report is forwarded to the *focused* sheet: the
+    /// keyboard's rule, and the only one that makes sense for a child, since the
+    /// pointer it sees is its own and a sheet that is not focused has no child
+    /// waiting to hear about one. A position outside the child's grid -- the
+    /// border row a full-screen sheet does not have, say -- has no coordinates in
+    /// a terminal mouse protocol, so the edge clips it into the grid rather than
+    /// dropping it.
     ///
     /// The held button is tracked here rather than at the edge because it is
     /// state: a drag report does not name its button, so the child can only be
@@ -263,7 +277,12 @@ impl State {
     /// from under the view. Reusing `Stack::hit_test` would test the unfolded
     /// layout and do exactly that.
     fn handle_mouse(&mut self, mouse: tuinix::MouseInput) -> Vec<Action> {
-        if self.mouse_wanted {
+        // The focused child's report is the one that lands in its region, or any
+        // report at all once it has a button held from such a report: a drag may
+        // leave the region and has to keep going to the child that saw its press.
+        if self.mouse_wanted
+            && (self.held_button.is_some() || self.lands_on_focused_region(mouse.position))
+        {
             return self.forward_mouse(mouse);
         }
         if mouse.kind != tuinix::MouseInputKind::LeftPress {
@@ -277,6 +296,20 @@ impl State {
         // Focus is a pure state change: nothing has to be spawned, resized, or
         // written to a child. The edge repaints because the frame changed.
         Vec::new()
+    }
+
+    /// Returns whether `position` is inside the focused sheet's region.
+    ///
+    /// The test is against [`regions()`](State::regions), the same layout the
+    /// hit test uses, so it agrees with what is on screen: a full-screen sheet's
+    /// region is the whole terminal there, and a hidden sheet's is empty. An
+    /// empty stack has no region, so nothing lands on it.
+    fn lands_on_focused_region(&self, position: tuinix::Position) -> bool {
+        let Some(index) = self.focused_index() else {
+            return false;
+        };
+        self.region_of(index)
+            .is_some_and(|region| region.contains(position))
     }
 
     /// Sends a mouse report to the focused sheet's child and tracks the button.

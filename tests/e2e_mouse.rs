@@ -267,6 +267,38 @@ fn script_without_ask(name: &str) -> PathBuf {
 }
 
 #[test]
+fn a_click_outside_a_mouse_tracking_child_still_moves_focus() {
+    // The upper sheet runs a program that tracks the mouse; the lower one does
+    // not. A click on the lower sheet is a click on tumu's chrome, not on the
+    // program, so it must move the focus rather than be swallowed by the
+    // tracking child. The report is still tumu's because it lands outside the
+    // focused sheet's region.
+    let shell = mouse_asking_shell("neighbour-focus");
+    let mut tumu = e2e::TumuHarness::with_shell_and_orientation(
+        24,
+        80,
+        shell.to_str().expect("utf-8 path"),
+        "horizontal",
+    );
+    tumu.wait_for_column_text("[C-q ...]");
+    tumu.send_prefix();
+    tumu.send_char('n');
+    wait_for_focus(&mut tumu, true);
+    // The new top sheet runs the mouse-asking script; wait for its ask to land.
+    tumu.wait_for_text("MOUSE-ASKED");
+
+    // Click the lower sheet: focus moves down, and the label moves with it. The
+    // tracking child did not get the report, so no `od` line appears.
+    tumu.click(5, LOWER_SHEET_COL);
+    wait_for_focus(&mut tumu, false);
+    assert!(
+        !tumu.screen_text().contains(";61;6M"),
+        "the report for the lower sheet is not forwarded to the tracking child:\n{}",
+        tumu.screen_text()
+    );
+}
+
+#[test]
 fn the_keyboard_follows_a_click() {
     let mut tumu = harness("keyboard-follows");
     tumu.wait_for_column_text("[C-q ...]");
