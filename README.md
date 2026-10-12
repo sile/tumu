@@ -96,6 +96,12 @@ the sheets out along the axis they already have, so the arrangement only changes
 when it is asked to. The label `[C-q ...]` is drawn only on the focused sheet, so
 which sheet the keyboard is aimed at is visible in the frame alone.
 
+A sheet's content is the region above its border (or left of it, horizontally):
+the border line is the sheet's own, not the child's, so the child's grid is one
+row (or column) shorter than the sheet. The one exception is the **full-screen**
+sheet (`prefix z`): it has no neighbour to be closed off from, so it draws no
+border at all and its child's grid fills the whole terminal.
+
 Orientation
 -----------
 

@@ -785,13 +785,10 @@ impl App {
     /// whole of this: a session is a session, and which child it is makes no
     /// difference to how it is sized, attached, or painted.
     fn spawn_session(&mut self, index: usize, program: tumu::Program) -> std::io::Result<()> {
-        let Some(region) = self.state.region_of(index) else {
+        let Some(region) = self.state.content_region_of(index) else {
             return Ok(());
         };
-        let orientation = self.state.orientation();
-        let Some(size) =
-            tumu::terminal_size_to_cell_size(tumu::sheet_content_size(region.size, orientation))
-        else {
+        let Some(size) = tumu::terminal_size_to_cell_size(region.size) else {
             return Ok(());
         };
         // The editor's file is named by the core and placed by this edge: the
@@ -1053,9 +1050,12 @@ impl App {
     fn focused_cursor(&self) -> Option<tuinix::Position> {
         let index = self.state.focused_index()?;
         let region = self.state.region_of(index)?;
-        let orientation = self.state.orientation();
-        let content_size = tumu::sheet_content_size(region.size, orientation);
-        let content_origin = tumu::sheet_content_origin(orientation);
+        let content = self.state.content_region_of(index)?;
+        let content_size = content.size;
+        let content_origin = tuinix::Position {
+            row: content.position.row - region.position.row,
+            col: content.position.col - region.position.col,
+        };
         let session_id = self.session_at(index)?;
         let session = self.sessions.get(&session_id)?;
         let terminal = session.terminal_state();

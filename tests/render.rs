@@ -217,6 +217,63 @@ fn a_sheet_with_no_contents_shows_only_its_border() {
 }
 
 #[test]
+fn a_full_screen_sheet_draws_no_border_and_contents_fill_the_terminal() {
+    use termnix::{Cell, Style};
+
+    /// Builds a single-width cell holding `ch`.
+    fn cell(ch: char) -> Cell {
+        Cell {
+            ch,
+            width: 1,
+            style: Style::default(),
+        }
+    }
+
+    // Two sheets stacked vertically, the top one taken full screen. Without a
+    // border the top sheet fills the whole 24 rows, so a grid row that would
+    // have been clipped at the border is shown all the way down.
+    let mut state = started(24, 40, VERTICAL);
+    state.stack.push_top();
+    state.focused = Some(state.stack.sheets()[0].0);
+    // `prefix z` takes the focused sheet full screen, the same chord the user
+    // presses; the state's own handler is what flips the flag.
+    state.update(tumu::Event::Key(tumu::prefix_key(
+        tumu::DEFAULT_PREFIX_CHAR,
+    )));
+    state.update(tumu::Event::Key(tuinix::KeyInput {
+        code: tuinix::KeyCode::Char('z'),
+        ctrl: false,
+        alt: false,
+    }));
+    assert!(state.full_screen, "the top sheet is full screen");
+
+    // A grid deep enough to reach the last row the border used to own.
+    let deep: Vec<Vec<Cell>> = (0..24).map(|_| vec![cell('x'), cell('y')]).collect();
+    let rows: Vec<&[Cell]> = deep.iter().map(|row| row.as_slice()).collect();
+    let grid = tumu::SheetGrid {
+        rows,
+        cursor: termnix::Position { row: 0, col: 0 },
+        cursor_visible: false,
+    };
+    let contents = grids_of(grid);
+
+    let frame = tumu::frame(&state, &contents);
+    let text: String = frame.chars().map(|(_, ch)| ch.value()).collect();
+
+    // No border character anywhere: the full-screen sheet has no line to spend.
+    assert!(!text.contains('└'), "no border corner is drawn: {text:?}");
+    assert!(!text.contains('─'), "no border rule is drawn: {text:?}");
+    // The last row is the grid's, not a border's. The rest of the row is blank
+    // padding to the sheet's full width, which is what the border used to make
+    // room for.
+    assert_eq!(
+        row_text(&frame, 23).trim_end(),
+        "xy",
+        "the last row carries content, not a border"
+    );
+}
+
+#[test]
 fn the_border_label_follows_the_configured_prefix_character() {
     // The label names the key that is actually in force, so a state built with
     // another prefix character must show that character and not the default.

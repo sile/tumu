@@ -160,7 +160,7 @@ fn convert_color(color: Option<termnix::Color>) -> Option<tuinix::Color> {
     }
 }
 
-/// Returns the size of a sheet's content when the sheet is `size`.
+/// Returns the size of a sheet's content when a *bordered* sheet is `size`.
 ///
 /// The border takes one line off the sheet along the stack's axis: one of the
 /// rows when the stack runs vertically, one of the columns when it runs
@@ -178,6 +178,10 @@ fn convert_color(color: Option<termnix::Color>) -> Option<tuinix::Color> {
 /// from there and the border is placed after it, so the sheet's own frame never
 /// moves. The screen position of the sheet is applied when the sheet is composed
 /// into the screen, not when it is drawn.
+///
+/// A full-screen sheet draws no border (see [`State::content_region_of`]), so
+/// this size is only the bordered case; the full-screen case is the region
+/// itself.
 pub fn sheet_content_size(size: tuinix::Size, orientation: crate::Orientation) -> tuinix::Size {
     match orientation {
         crate::Orientation::Vertical => tuinix::Size {
@@ -226,15 +230,27 @@ pub fn frame(state: &State, contents: &SheetGrids) -> tuinix::Frame {
         if region.size.rows == 0 || region.size.cols == 0 {
             continue;
         }
-        let mut sheet_frame = sheet_frame(
-            sheet,
-            region.size,
-            focused == Some(index),
-            orientation,
-            state.prefix_char,
-        );
+        // A full-screen sheet draws no border: it fills its region whole, so
+        // there is no line to reserve and no `sheet_frame` to compose under it.
+        let bordered = state.sheet_is_bordered(index);
+        let mut sheet_frame = if bordered {
+            sheet_frame(
+                sheet,
+                region.size,
+                focused == Some(index),
+                orientation,
+                state.prefix_char,
+            )
+        } else {
+            tuinix::Frame::new(region.size)
+        };
         if let Some(grid) = contents.grid(index) {
-            let mut content = tuinix::Frame::new(sheet_content_size(region.size, orientation));
+            let content_size = if bordered {
+                sheet_content_size(region.size, orientation)
+            } else {
+                region.size
+            };
+            let mut content = tuinix::Frame::new(content_size);
             draw_sheet_grid(&mut content, grid);
             // The content frame sits at the sheet's own corner; the border is
             // the line left over at the far end of the axis.

@@ -136,12 +136,13 @@ fn the_full_screen_command_fills_the_terminal_and_folds_back() {
     tumu.send_prefix();
     tumu.send_char('z');
 
-    // The focused sheet takes the whole terminal; the other is hidden, so the
-    // border it used to show (at column 39) is gone and the focused sheet's
-    // border is the screen's last column.
-    tumu.wait_until("the hidden sheet's border is gone", |h| {
-        h.screen_column(79).starts_with("└ [C-q ...]")
-            && h.screen_column(39).chars().all(|c| !"└─".contains(c))
+    // The focused sheet takes the whole terminal and draws *no* border: a
+    // full-screen sheet has no neighbour to be closed off from, so the line it
+    // showed at column 39 is gone and the one it would have shown at column 79
+    // is not drawn either. Nothing of a border is left on the screen.
+    tumu.wait_until("no sheet border at all", |h| {
+        h.screen_column(39).chars().all(|c| !"└─".contains(c))
+            && h.screen_column(79).chars().all(|c| !"└─".contains(c))
     });
 
     tumu.send_prefix();

@@ -288,14 +288,17 @@ fn the_rotate_layout_command_flips_the_axis_and_resizes() {
     let actions = run_command(&mut state, 'r');
 
     assert_eq!(state.orientation(), tumu::Orientation::Vertical);
-    // The region's shape changed, so every session is resized to it. The action
-    // names the whole sheet region; the edge is what subtracts the border.
+    // The region's shape changed, so every session is resized to it -- and to
+    // the *content* region, not the whole sheet: the border line is not the
+    // child's, so a vertical sheet of 24 rows offers its child 23. That is the
+    // same size the spawn is given, which is what keeps a resize from disagreeing
+    // with the spawn about how tall the grid is.
     assert_eq!(
         actions,
         vec![tumu::Action::ResizeSession {
             index: 0,
             size: termnix::Size {
-                rows: std::num::NonZeroU16::new(24).expect("non-zero"),
+                rows: std::num::NonZeroU16::new(23).expect("non-zero"),
                 cols: std::num::NonZeroU16::new(80).expect("non-zero"),
             },
         }]
@@ -740,6 +743,66 @@ fn a_sheet_hidden_by_full_screen_has_an_empty_region() {
     // `Some(empty)` means hidden and `None` means no such sheet.
     assert_eq!(state.region_of(1).map(|r| r.size.rows), Some(0));
     assert_eq!(state.region_of(2), None);
+}
+
+#[test]
+fn a_bordered_sheet_offers_its_child_one_row_less_than_its_region() {
+    // Horizontal, so the border is the last *column*: the content is one column
+    // narrower than the sheet, at the sheet's own corner.
+    let state = state_with(24, 80, 1);
+
+    let region = state.region_of(0).expect("sheet 0");
+    let content = state.content_region_of(0).expect("sheet 0");
+
+    assert_eq!(region.size.cols, 80);
+    assert_eq!(content.size.cols, 79);
+    assert_eq!(content.size.rows, region.size.rows);
+    // The content starts at the sheet's own corner; the border is the column
+    // left over at the far end.
+    assert_eq!(content.position, region.position);
+    assert!(state.sheet_is_bordered(0));
+}
+
+#[test]
+fn a_full_screen_sheet_offers_its_child_its_whole_region() {
+    let mut state = state_with(24, 80, 2);
+    run_command(&mut state, 'z');
+
+    // A full-screen sheet draws no border, so its content is the whole region:
+    // the child gets every row and column, exactly as it would with no
+    // multiplexer in front of it.
+    let region = state.region_of(0).expect("sheet 0");
+    let content = state.content_region_of(0).expect("sheet 0");
+    assert_eq!(content, region);
+    assert!(!state.sheet_is_bordered(0));
+
+    // The hidden sheet is still bordered, and its content region is still empty
+    // -- nothing is drawn for it either way.
+    assert_eq!(state.content_region_of(1).map(|r| r.size.rows), Some(0));
+    assert!(state.sheet_is_bordered(1));
+}
+
+#[test]
+fn a_resize_and_a_spawn_agree_on_a_sheets_content_size() {
+    // The seed is what a resize returns, and it names the content region -- the
+    // rows above the border -- not the whole sheet. That is deliberate: it is
+    // the very size the edge spawns a session at, so a later resize cannot
+    // shrink the child by a line the spawn did not take.
+    let mut state = state_with(24, 80, 1);
+    let grid = termnix::Size {
+        rows: std::num::NonZeroU16::new(24).expect("non-zero"),
+        cols: std::num::NonZeroU16::new(79).expect("non-zero"),
+    };
+
+    let actions = state.update(tumu::Event::Resize(size(24, 80)));
+
+    assert_eq!(
+        actions,
+        vec![tumu::Action::ResizeSession {
+            index: 0,
+            size: grid
+        }]
+    );
 }
 
 /// A mouse report of `kind` at a zero-based `position`.

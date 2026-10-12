@@ -628,13 +628,23 @@ impl State {
     }
 
     /// Returns a `ResizeSession` for every sheet that ends up with a usable
-    /// region.
+    /// content region.
+    ///
+    /// The size is the sheet's *content* region, not the sheet's region: the
+    /// border line is not the child's, so the grid is sized to the rows or
+    /// columns the content actually has (see
+    /// [`content_region_of`](State::content_region_of)). That is the same size
+    /// the edge spawns a session at, so a later resize agrees with the spawn
+    /// rather than shrinking the child by a line the spawn did not take.
     ///
     /// A region too small to give the child a non-zero grid is skipped, the
     /// same way a resize that produces one is.
     fn resize_actions(&self) -> Vec<Action> {
         let mut actions = Vec::new();
-        for (index, region) in self.regions().into_iter().enumerate() {
+        for index in 0..self.stack.len() {
+            let Some(region) = self.content_region_of(index) else {
+                continue;
+            };
             if let Some(grid) = crate::terminal_size_to_cell_size(region.size) {
                 actions.push(Action::ResizeSession { index, size: grid });
             }
@@ -676,6 +686,44 @@ impl State {
     /// hides has an empty region, so it is nothing to draw.
     pub fn region_of(&self, index: usize) -> Option<tuinix::Region> {
         self.regions().into_iter().nth(index)
+    }
+
+    /// Returns the *content* region of the sheet at `index`: the part of its
+    /// region the child's grid covers, border excluded.
+    ///
+    /// A bordered sheet -- every sheet but the one shown full screen -- loses
+    /// one line to the border along the stack's axis, so the content is a
+    /// [`sheet_content_size`](crate::sheet_content_size) inside the region. The
+    /// full-screen sheet draws **no** border: it fills the whole region, so its
+    /// content is the region itself. That one exception is why this lives on the
+    /// state -- full screen is the state's fact, and the two sides that size a
+    /// child ([`resize_actions`](State::resize_actions) here and the edge's
+    /// spawn) have to agree with the renderer, which is the third reader.
+    ///
+    /// Returns `None` when there is no such sheet. A sheet the full screen
+    /// hides has an empty region, so an empty content region.
+    pub fn content_region_of(&self, index: usize) -> Option<tuinix::Region> {
+        let region = self.region_of(index)?;
+        if self.full_screen && Some(index) == self.focused_index() {
+            return Some(region);
+        }
+        Some(tuinix::Region {
+            position: tuinix::Position {
+                row: region.position.row + crate::sheet_content_origin(self.orientation).row,
+                col: region.position.col + crate::sheet_content_origin(self.orientation).col,
+            },
+            size: crate::sheet_content_size(region.size, self.orientation),
+        })
+    }
+
+    /// Returns whether the sheet at `index` is drawn without a border.
+    ///
+    /// Only the full-screen sheet is: it is shown as if it were the whole
+    /// terminal, so it has no neighbour to be closed off from and no line to
+    /// spend on one. The renderer asks this so the sheet's content fills the
+    /// whole region rather than the rows above a border.
+    pub fn sheet_is_bordered(&self, index: usize) -> bool {
+        !(self.full_screen && Some(index) == self.focused_index())
     }
 
     /// Records the new size and lays every sheet out again.
