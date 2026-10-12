@@ -81,21 +81,16 @@ impl Stack {
 
     /// Moves the sheet at `index` to the top of the stack.
     ///
-    /// Does nothing when there is no such sheet.
+    /// Does nothing when there is no such sheet. This is `prefix t`: the sheet
+    /// is lifted out and put back first, the sheets above it closing ranks
+    /// behind it. There is no matching `move_to_bottom`, because putting a sheet
+    /// at the bottom is not a command -- every sheet that is not at the top
+    /// shares that place, so "the bottom" names no one place the keyboard could
+    /// be aimed at.
     pub fn move_to_top(&mut self, index: usize) {
         if index < self.sheets.len() {
             let entry = self.sheets.remove(index);
             self.sheets.insert(0, entry);
-        }
-    }
-
-    /// Moves the sheet at `index` to the bottom of the stack.
-    ///
-    /// Does nothing when there is no such sheet.
-    pub fn move_to_bottom(&mut self, index: usize) {
-        if index < self.sheets.len() {
-            let entry = self.sheets.remove(index);
-            self.sheets.push(entry);
         }
     }
 

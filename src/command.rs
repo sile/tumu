@@ -41,8 +41,19 @@ pub enum Command {
     /// bottom -- and resizes nothing.
     FocusPrevious,
 
-    /// Move the focused sheet to the bottom, bringing the next one up.
-    RotateSheets,
+    /// Move the focused sheet to the top of the stack.
+    ///
+    /// The focused sheet is lifted out of the stack and put back at the top,
+    /// the sheets that were above it closing ranks behind it. It is a move of
+    /// that one sheet, not a rotation: the keyboard stays where it was -- on the
+    /// sheet that moved -- so the sheet comes to the top *under the keyboard*,
+    /// which is what makes it useful (pinning the sheet in hand at the place
+    /// new sheets appear). A sheet already at the top has nowhere to go, and a
+    /// lone sheet has nothing to move past, so both are no-ops.
+    ///
+    /// This is a rearrangement, not a view: the stack's order changes, so every
+    /// region is re-derived and the sessions are resized to match.
+    MoveSheetToTop,
 
     /// Stack the sheets the other way: top to bottom, or left to right.
     ///

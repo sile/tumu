@@ -133,7 +133,7 @@ pub struct State {
     /// stack is reordered around it; [`focused_index`](State::focused_index)
     /// turns it into a position. It is cleared the moment it would name a sheet
     /// that is no longer in the stack -- see
-    /// [`handle_rotate_sheets`](State::handle_rotate_sheets) and
+    /// [`handle_move_sheet_to_top`](State::handle_move_sheet_to_top) and
     /// [`handle_session_exited`](State::handle_session_exited).
     pub focused: Option<SheetId>,
 
@@ -484,8 +484,8 @@ impl State {
     ///
     /// Which sheet receives it is named by focus, not by position: the key is
     /// delivered to the focused sheet even when it is not the top of the stack,
-    /// so rotating the stack moves the keyboard to the sheet that came up. With
-    /// no sheet to receive it the key is dropped.
+    /// so the sheet under the keyboard is the one the key reaches through any
+    /// reorder. With no sheet to receive it the key is dropped.
     fn send_key(&self, key: tuinix::KeyInput) -> Vec<Action> {
         let Some(index) = self.focused_index() else {
             return Vec::new();
@@ -500,7 +500,7 @@ impl State {
             Command::CloseSheet => self.handle_close_sheet(),
             Command::FocusNext => self.handle_focus_step(1),
             Command::FocusPrevious => self.handle_focus_step(-1),
-            Command::RotateSheets => self.handle_rotate_sheets(),
+            Command::MoveSheetToTop => self.handle_move_sheet_to_top(),
             Command::RotateOrientation => self.handle_rotate_orientation(),
             Command::ToggleFullScreen => self.handle_toggle_full_screen(),
             Command::EditScrollback => self.handle_edit_scrollback(),
@@ -603,25 +603,30 @@ impl State {
         Vec::new()
     }
 
-    /// Moves the focused sheet to the bottom and the next one to the top.
+    /// Moves the focused sheet to the top of the stack.
     ///
-    /// Does nothing when there is at most one sheet, since rotating a single
-    /// sheet is a no-op. The regions swap with the order, so every session is
-    /// resized.
-    fn handle_rotate_sheets(&mut self) -> Vec<Action> {
+    /// The focused sheet is lifted out and put back at index 0; the sheets that
+    /// were above it slide down by one to close the gap. Nothing changes about
+    /// *which* sheet is focused -- the one that moved keeps the keyboard -- so
+    /// the sheet comes to the top under the keyboard rather than the keyboard
+    /// moving to the top. That is the point: it pins the sheet in hand where new
+    /// sheets appear, so `prefix t` on a sheet then `prefix c` stacks the next
+    /// sheets under a stable one.
+    ///
+    /// A sheet already at the top has nowhere to go and a lone sheet has nothing
+    /// to pass, so both are no-ops: the order that would result is the order
+    /// already in hand, and re-deriving it would resize sessions for no visible
+    /// change. Otherwise the order changed, so every region is re-derived and
+    /// the sessions are resized -- but the keyboard does not move, so the focus
+    /// survives the reorder by identity.
+    fn handle_move_sheet_to_top(&mut self) -> Vec<Action> {
         let Some(index) = self.focused_index() else {
             return Vec::new();
         };
-        if self.stack.len() <= 1 {
+        if index == 0 || self.stack.len() <= 1 {
             return Vec::new();
         }
-        // Whichever sheet takes the focused one's place is focused next, so the
-        // rotation brings the stack up under the keyboard rather than moving the
-        // keyboard away. The focused sheet goes to the bottom, so rotating the
-        // top sheet leaves focus on the new top.
-        self.stack.move_to_bottom(index);
-        self.focused = successor(self.stack.sheets(), index)
-            .or_else(|| self.stack.sheets().first().map(|(id, _)| *id));
+        self.stack.move_to_top(index);
         self.resize_actions()
     }
 

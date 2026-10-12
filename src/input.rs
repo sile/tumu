@@ -120,9 +120,9 @@ pub const BINDINGS: &[Binding] = &[
         label: "focus down/right",
     },
     Binding {
-        key: chord('o'),
-        command: Command::RotateSheets,
-        label: "rotate to bottom",
+        key: chord('t'),
+        command: Command::MoveSheetToTop,
+        label: "move to top",
     },
     Binding {
         key: chord('r'),

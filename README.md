@@ -173,7 +173,7 @@ and the setting needs no check against the binding table.
 - `prefix x` -- open the extended menu (see below)
 - `prefix p` -- move the focus up (vertical) / left (horizontal)
 - `prefix n` -- move the focus down (vertical) / right (horizontal)
-- `prefix o` -- move the focused sheet to the bottom
+- `prefix t` -- move the focused sheet to the top of the stack
 - `prefix r` -- flip the stacking axis (vertical / horizontal)
 - `prefix z` -- show the focused sheet full screen, and back
 - `prefix l` -- open the focused sheet's scrollback in an editor (see below)
@@ -204,10 +204,10 @@ menu is shown only when the box fits, so on a very small screen these commands
 are unreachable rather than offered unreadably.
 
 The focused sheet is the sheet the commands act on and the one the keyboard is
-sent to. A new sheet goes on top and takes the focus; `prefix o`, and closing a
-sheet through the extended menu, move it to the sheet that takes the focused
-one's place, so the stack comes up under the keyboard rather than the keyboard
-moving away.
+sent to. A new sheet goes on top and takes the focus; closing a sheet through
+the extended menu moves the focus to the sheet that takes the focused one's
+place, so the stack comes up under the keyboard rather than the keyboard moving
+away.
 
 `prefix n` and `prefix p` move the focus one place along the stack, in the
 direction the stack advances: `n` is *next* (down when the sheets run down the
@@ -216,6 +216,14 @@ step wraps -- from either end of the stack it comes around to the other, so
 repeated steps cycle through every sheet -- and it moves only the keyboard: the
 stack keeps its order, so nothing is resized. `c` is *create* rather than the
 more usual `n` for a new sheet, because `n` is the step downwards.
+
+`prefix t` moves the focused sheet itself to the top of the stack: it is lifted
+out and put back first, the sheets that were above it closing ranks behind it.
+Unlike a focus step this reorders the stack, so the sessions are resized -- but
+the keyboard does not move, because the sheet that moved keeps it. That is the
+point: it pins the sheet in hand where new sheets appear, so `prefix t` then
+`prefix c` stacks the next sheets under a stable one. A sheet already on top has
+nowhere to go, so `prefix t` on it does nothing.
 
 `prefix z` is a view, not a rearrangement: the focused sheet fills the
 terminal while the others keep their places, and clearing the flag brings the

@@ -101,8 +101,8 @@ fn closing_the_focused_sheet_grows_the_rest() {
 }
 
 #[test]
-fn the_rotate_command_brings_the_stack_up_under_the_keyboard() {
-    let mut tumu = harness("rotate");
+fn the_move_to_top_command_brings_the_sheet_under_the_keyboard_to_the_top() {
+    let mut tumu = harness("move-to-top");
     tumu.wait_for_column_text("[C-q ...]");
     tumu.send_prefix();
     tumu.send_char('c');
@@ -110,15 +110,19 @@ fn the_rotate_command_brings_the_stack_up_under_the_keyboard() {
         h.screen_column(39).starts_with("└ [C-q ...]") && h.screen_column(79).starts_with("└")
     });
 
+    // Step down to the lower sheet, so the keyboard is on the one that is *not*
+    // on top.
     tumu.send_prefix();
-    tumu.send_char('o');
+    tumu.send_char('n');
+    tumu.wait_until("the label moves down", |h| {
+        h.screen_column(79).starts_with("└ [C-q ...]") && h.screen_column(39).starts_with("└─")
+    });
 
-    // Rotating moves the top sheet to the bottom, so the sheet that was at
-    // index 1 comes up to index 0 and takes the focus with it. Focus is on the
-    // sheet that came to the *top*, so the label stays in column 39: what moved
-    // is which sheet wears it, which the frame alone does not show. The layout
-    // is unchanged -- two 40-column sheets -- so the observable result is that
-    // the label is still exactly once, on the top sheet.
+    // `t` lifts that sheet to the top. The sheet moves under the keyboard, so
+    // the label moves to the top sheet's border -- which is now the sheet that
+    // wears it -- while the layout stays two 40-column sheets.
+    tumu.send_prefix();
+    tumu.send_char('t');
     tumu.wait_until("the label is back on the top sheet", |h| {
         h.screen_column(39).starts_with("└ [C-q ...]") && h.screen_column(79).starts_with("└─")
     });

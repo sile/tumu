@@ -380,22 +380,55 @@ fn a_focus_step_on_an_empty_stack_does_nothing() {
 }
 
 #[test]
-fn the_rotate_command_moves_the_focused_sheet_to_the_bottom() {
+fn the_move_to_top_command_lifts_the_focused_sheet_to_the_top() {
+    // Focus the bottom sheet and move it to the top: it leaves its place and
+    // the two above it slide down, so the order is turned so the moved sheet is
+    // first and the rest keep their relative order.
     let mut state = state_with(24, 80, 3);
     let top = state.stack.sheets()[0].0;
-    state.update(tumu::Event::Key(prefix()));
+    let middle = state.stack.sheets()[1].0;
+    let bottom = state.stack.sheets()[2].0;
+    state.focused = Some(bottom);
 
-    state.update(tumu::Event::Key(ch('o')));
+    run_command(&mut state, 't');
 
-    assert_eq!(state.stack.sheets().last().map(|(id, _)| *id), Some(top));
+    let order: Vec<_> = state.stack.sheets().iter().map(|(id, _)| *id).collect();
+    assert_eq!(
+        order,
+        vec![bottom, top, middle],
+        "the focused sheet is first"
+    );
+    assert_eq!(
+        state.focused,
+        Some(bottom),
+        "the keyboard stays on the sheet that moved"
+    );
 }
 
 #[test]
-fn rotating_a_single_sheet_does_nothing() {
-    let mut state = state_with(24, 80, 1);
-    state.update(tumu::Event::Key(prefix()));
+fn moving_a_sheet_already_on_top_does_nothing() {
+    // The resulting order would be the order already in hand, so the command is
+    // a no-op: nothing is resized and the order is unchanged.
+    let mut state = state_with(24, 80, 3);
+    let order: Vec<_> = state.stack.sheets().iter().map(|(id, _)| *id).collect();
+    assert_eq!(
+        state.focused,
+        Some(order[0]),
+        "focus starts on the top sheet"
+    );
 
-    let actions = state.update(tumu::Event::Key(ch('o')));
+    let actions = run_command(&mut state, 't');
+
+    assert!(actions.is_empty());
+    let after: Vec<_> = state.stack.sheets().iter().map(|(id, _)| *id).collect();
+    assert_eq!(after, order);
+}
+
+#[test]
+fn moving_a_single_sheet_does_nothing() {
+    let mut state = state_with(24, 80, 1);
+
+    let actions = run_command(&mut state, 't');
 
     assert!(actions.is_empty());
     assert_eq!(state.stack.len(), 1);
@@ -667,18 +700,17 @@ fn the_first_sheet_is_focused_and_the_next_ones_take_it_over() {
 }
 
 #[test]
-fn rotating_moves_focus_to_the_sheet_that_comes_up() {
+fn moving_a_sheet_to_the_top_sends_the_keyboard_with_it() {
+    // After the move the focused sheet is at index 0, and the next key goes to
+    // *it* -- the keyboard moved with the sheet, not to a rank.
     let mut state = state_with(24, 80, 3);
-    let top = state.stack.sheets()[0].0;
-    let next = state.stack.sheets()[1].0;
+    let bottom = state.stack.sheets()[2].0;
+    state.focused = Some(bottom);
 
-    run_command(&mut state, 'o');
+    run_command(&mut state, 't');
 
-    // The old top went to the bottom; the sheet that was second is now first
-    // and is what the keyboard talks to.
-    assert_eq!(state.stack.sheets()[0].0, next);
-    assert_eq!(state.stack.sheets().last().map(|(id, _)| *id), Some(top));
-    assert_eq!(state.focused, Some(next));
+    assert_eq!(state.stack.sheets()[0].0, bottom);
+    assert_eq!(state.focused, Some(bottom));
     assert_eq!(
         state.update(tumu::Event::Key(ch('a'))),
         vec![tumu::Action::SendToFocused {
@@ -689,17 +721,26 @@ fn rotating_moves_focus_to_the_sheet_that_comes_up() {
 }
 
 #[test]
-fn rotating_the_bottom_sheet_keeps_the_keyboard_on_it() {
-    // Focus follows the rank, not the sheet: the stack comes up under the
-    // keyboard. Start with the *bottom* sheet focused instead of the top.
-    let mut state = state_with(24, 80, 3);
-    let bottom = state.stack.sheets()[2].0;
-    state.focused = Some(bottom);
+fn moving_a_sheet_to_the_top_resizes_the_stack() {
+    // The order changed, so every region is re-derived and the sessions are
+    // resized to match -- unlike a focus step, which moves only the keyboard.
+    let mut state = state_with(24, 80, 2);
+    state.stack.attach_session(0, session(1));
+    state.stack.attach_session(1, session(2));
+    state.focused = Some(state.stack.sheets()[1].0);
 
-    run_command(&mut state, 'o');
+    let actions = run_command(&mut state, 't');
 
-    assert_eq!(state.stack.sheets()[2].0, bottom);
-    assert_eq!(state.focused, Some(bottom));
+    assert!(
+        !actions.is_empty(),
+        "a reorder resizes: the regions changed"
+    );
+    assert!(
+        actions
+            .iter()
+            .all(|action| matches!(action, tumu::Action::ResizeSession { .. })),
+        "the only work a move causes is resizing: {actions:?}"
+    );
 }
 
 #[test]
