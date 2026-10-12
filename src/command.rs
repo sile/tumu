@@ -78,6 +78,17 @@ pub enum Command {
     /// bytes.
     PasteClipboard,
 
+    /// Open the extended menu: the second row of commands, where the ones whose
+    /// effect cannot be taken back live.
+    ///
+    /// Closing a sheet and quitting both end something the user may still want,
+    /// so they are one step removed from the prefix. The step is a menu rather
+    /// than a confirmation prompt because a prompt asks the *same* question
+    /// every time and can be answered by muscle memory, while a menu makes the
+    /// user read a different row before choosing -- the shape `kk`'s ext mode
+    /// has. The command carries nothing: the menu holds its own bindings.
+    OpenExtMenu,
+
     /// Leave the multiplexer.
     Quit,
 }

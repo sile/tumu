@@ -39,7 +39,10 @@ fn the_prefix_shows_the_menu() {
     // The box appears, with each binding's key and label on its rows.
     tumu.wait_until("the menu appears", |h| h.screen_contains("┌"));
     assert!(tumu.screen_contains("new sheet"));
-    assert!(tumu.screen_contains("quit"));
+    // `quit` is not here: it is behind the extended menu now, so a stray key
+    // at the prefix cannot quit.
+    assert!(!tumu.screen_contains("quit"));
+    assert!(tumu.screen_contains("ext menu"));
 }
 
 #[test]
@@ -91,18 +94,24 @@ fn clicking_a_menu_row_moves_the_focus_and_leaves_the_menu_up() {
     tumu.send_prefix();
     tumu.wait_until("the menu appears", |h| h.screen_contains("┌"));
 
-    // Click the row that says "quit".
+    // Click the row that says "new sheet".
     let row = tumu
         .screen_rows()
         .iter()
-        .position(|line| line.contains("quit"))
-        .expect("a quit row") as u16;
+        .position(|line| line.contains("new sheet"))
+        .expect("a new sheet row") as u16;
     tumu.click(row, 30);
 
-    // Tumu is still running -- `quit` was not run -- and the menu is still up.
+    // Tumu is still running -- no sheet was made -- and the menu is still up.
     // A key still works, which is what proves the latch and the menu survived
     // the click: the chord closes the menu and runs.
     tumu.wait_until("the menu is still up", |h| h.screen_contains("┌"));
-    tumu.send_char('q');
-    tumu.wait_for_exit();
+    tumu.send_char('c');
+    tumu.wait_until("a second sheet is made", |h| {
+        h.screen_rows()
+            .iter()
+            .filter(|line| line.starts_with("└"))
+            .count()
+            >= 2
+    });
 }

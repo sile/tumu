@@ -103,8 +103,8 @@ impl MenuLayout {
     }
 }
 
-/// Lays the menu out on a screen of `size`, or returns `None` when there is not
-/// enough room for it.
+/// Lays the prefix menu out on a screen of `size`, or returns `None` when there
+/// is not enough room for it.
 ///
 /// The box is centred on the screen. Its width is the widest row (header, every
 /// binding, the send-prefix row) plus the two border columns and the padding;
@@ -113,23 +113,71 @@ impl MenuLayout {
 /// is not shown at all, rather than shown clipped: a half-visible menu is not a
 /// thing a click can be answered from honestly.
 pub fn menu_layout(size: tuinix::Size, prefix_key: &str) -> Option<MenuLayout> {
-    // The key column holds the header word and, on the send-prefix row, the
-    // prefix twice (what the chord *is*), so it is as wide as the widest of
-    // those and the single-character chords.
-    let send_prefix_key = format!("{prefix_key} {prefix_key}");
-    let key_width = BINDINGS
+    // The send-prefix row is the one row that is not a binding: it stands for
+    // the prefix pressed twice, so its key is the prefix written out and its
+    // label is the fixed word. It is appended after every binding, so it reads
+    // as "and then more" past the last command.
+    let send_prefix = Some(MenuRow {
+        key: prefix_key.to_string(),
+        label: SEND_PREFIX_LABEL.to_string(),
+        command: None,
+        // Filled in by `layout` once the box is placed; the row is always the
+        // last, so it can be located then.
+        region: EMPTY_REGION,
+    });
+    layout(BINDINGS, size, send_prefix)
+}
+
+/// Lays the extended menu out on a screen of `size`, or returns `None` when
+/// there is not enough room for it.
+///
+/// The extended menu is the same box as [`menu_layout`], built from
+/// [`EXT_BINDINGS`](crate::EXT_BINDINGS) instead: the commands kept out of the
+/// prefix because their effect cannot be taken back. It has no send-prefix row,
+/// because the prefix is not part of this menu -- it is *opened* by the prefix,
+/// and the keys it offers are a fresh set of chords, not the prefix's own.
+///
+/// The two menus share [`layout`], so a box is centred and measured by one
+/// routine whether it holds ten commands or two.
+pub fn ext_menu_layout(size: tuinix::Size) -> Option<MenuLayout> {
+    layout(crate::EXT_BINDINGS, size, None)
+}
+
+/// Lays a menu of `bindings` out on a screen of `size`, with `trailer` as an
+/// optional last row.
+///
+/// This is the one place the box is measured and placed, so the two menus (and
+/// any later one) cannot disagree about how a menu is centred or how wide a
+/// column is. `trailer` is the send-prefix row for the prefix menu and `None`
+/// for the extended menu; its region is filled in here once the box is placed,
+/// since the row is always the last.
+///
+/// Returns `None` when the box does not fit, rather than a clipped layout: a
+/// menu a row short is not something a key can be answered from honestly. That
+/// matters most for the extended menu, which is the only way to reach its
+/// commands -- a menu that cannot be shown is safer than a command that fires
+/// without one, but it means the commands are unreachable until the screen
+/// grows.
+fn layout(
+    bindings: &[crate::Binding],
+    size: tuinix::Size,
+    trailer: Option<MenuRow>,
+) -> Option<MenuLayout> {
+    // The key column holds the header word and every chord, so it is as wide as
+    // the widest of those. The trailer's key (the prefix, written out) counts
+    // too, so the column fits it when there is one.
+    let key_width = bindings
         .iter()
         .map(|binding| chord_text(binding).chars().count())
-        .chain([KEY_HEADER.chars().count(), send_prefix_key.chars().count()])
+        .chain([KEY_HEADER.chars().count()])
+        .chain(trailer.iter().map(|row| row.key.chars().count()))
         .max()
         .unwrap_or(0);
-    let label_width = BINDINGS
+    let label_width = bindings
         .iter()
         .map(|binding| binding.label.chars().count())
-        .chain([
-            LABEL_HEADER.chars().count(),
-            SEND_PREFIX_LABEL.chars().count(),
-        ])
+        .chain([LABEL_HEADER.chars().count()])
+        .chain(trailer.iter().map(|row| row.label.chars().count()))
         .max()
         .unwrap_or(0);
 
@@ -137,7 +185,9 @@ pub fn menu_layout(size: tuinix::Size, prefix_key: &str) -> Option<MenuLayout> {
     // the text, and the gap between the columns.
     let inner = key_width + GAP + label_width;
     let width = inner + 4;
-    let height = BINDINGS.len() + 4;
+    // A header, one row per binding, the trailer if there is one, and the two
+    // border rows.
+    let height = bindings.len() + 2 + usize::from(trailer.is_some());
 
     if width > size.cols || height > size.rows {
         return None;
@@ -169,14 +219,14 @@ pub fn menu_layout(size: tuinix::Size, prefix_key: &str) -> Option<MenuLayout> {
         },
     };
 
-    let mut rows = Vec::with_capacity(BINDINGS.len() + 2);
+    let mut rows = Vec::with_capacity(height - 2);
     rows.push(MenuRow {
         key: KEY_HEADER.to_string(),
         label: LABEL_HEADER.to_string(),
         command: None,
         region: row_region(0),
     });
-    for (offset, binding) in BINDINGS.iter().enumerate() {
+    for (offset, binding) in bindings.iter().enumerate() {
         rows.push(MenuRow {
             key: chord_text(binding),
             label: binding.label.to_string(),
@@ -184,12 +234,10 @@ pub fn menu_layout(size: tuinix::Size, prefix_key: &str) -> Option<MenuLayout> {
             region: row_region(1 + offset),
         });
     }
-    rows.push(MenuRow {
-        key: prefix_key.to_string(),
-        label: SEND_PREFIX_LABEL.to_string(),
-        command: None,
-        region: row_region(1 + BINDINGS.len()),
-    });
+    if let Some(mut trailer) = trailer {
+        trailer.region = row_region(1 + bindings.len());
+        rows.push(trailer);
+    }
 
     Some(MenuLayout {
         region,
@@ -198,6 +246,16 @@ pub fn menu_layout(size: tuinix::Size, prefix_key: &str) -> Option<MenuLayout> {
         rows,
     })
 }
+
+/// A placeholder rectangle for a row whose region is filled in by the caller.
+///
+/// Only the trailer is built this way: its row is made before the box is
+/// measured (its key is one of the things the width depends on), and its region
+/// is set once the box is placed. The value never reaches a [`MenuLayout`].
+const EMPTY_REGION: tuinix::Region = tuinix::Region {
+    position: tuinix::Position { row: 0, col: 0 },
+    size: tuinix::Size { rows: 0, cols: 0 },
+};
 
 /// Returns the text shown in the key column for `binding`.
 ///

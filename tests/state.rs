@@ -120,25 +120,41 @@ fn a_configured_prefix_still_resolves_chords() {
     let mut state = state_with_prefix_char('o');
 
     state.update(tumu::Event::Key(ctrl('o')));
-    let actions = state.update(tumu::Event::Key(ch('q')));
+    let actions = state.update(tumu::Event::Key(ch('c')));
 
-    // `prefix q` quits whatever the prefix character is: the chords are the
-    // unmodified keys and the prefix only arms the latch.
-    assert_eq!(actions, vec![tumu::Action::Exit]);
-    assert!(state.exit);
+    // `prefix c` makes a sheet whatever the prefix character is: the chords are
+    // the unmodified keys and the prefix only arms the latch.
+    assert!(
+        matches!(
+            actions.first(),
+            Some(&tumu::Action::SpawnSession {
+                index: 0,
+                program: tumu::Program::Shell
+            })
+        ),
+        "the chord resolved through the configured prefix, got {actions:?}"
+    );
 }
 
 #[test]
 fn the_prefix_character_does_not_shadow_a_chord() {
-    // With the prefix on `q`, the latch and the quit chord share a character;
-    // they are still different keys, because the prefix is `Ctrl+q` and the
-    // chord is `q`. This is the namespace the two live in.
+    // With the prefix on `q`, the latch and a chord that uses `q` would share a
+    // character; they are still different keys, because the prefix is `Ctrl+q`
+    // and a chord is bare `q`. This is the namespace the two live in.
+    //
+    // The chord here is `c` (new sheet), because `q` is no longer a *prefix*
+    // chord -- it moved behind the extended menu -- but the point is the same:
+    // the latch and the chord are told apart by the Ctrl, whatever character
+    // each carries.
     let mut state = state_with_prefix_char('q');
 
     state.update(tumu::Event::Key(ctrl('q')));
-    let actions = state.update(tumu::Event::Key(ch('q')));
+    let actions = state.update(tumu::Event::Key(ch('c')));
 
-    assert_eq!(actions, vec![tumu::Action::Exit]);
+    assert!(
+        matches!(actions.first(), Some(&tumu::Action::SpawnSession { .. })),
+        "the bare chord reached the table, got {actions:?}"
+    );
 }
 
 #[test]
@@ -218,7 +234,9 @@ fn the_close_sheet_command_drops_the_focused_sheet() {
     state.stack.attach_session(0, top);
     state.update(tumu::Event::Key(prefix()));
 
-    let actions = state.update(tumu::Event::Key(ch('x')));
+    // Closing is behind the extended menu: `x` opens it, `k` picks close.
+    state.update(tumu::Event::Key(ch('x')));
+    let actions = state.update(tumu::Event::Key(ch('k')));
 
     assert_eq!(state.stack.len(), 1);
     assert_eq!(
@@ -241,7 +259,10 @@ fn closing_a_sheet_names_the_session_it_closed_not_the_one_that_shifted_up() {
     state.stack.attach_session(1, below);
     state.update(tumu::Event::Key(prefix()));
 
-    let actions = state.update(tumu::Event::Key(ch('x')));
+    // The close is `x` then `k`, as above: the menu is what keeps the session
+    // named before the sheet is removed.
+    state.update(tumu::Event::Key(ch('x')));
+    let actions = state.update(tumu::Event::Key(ch('k')));
 
     assert_eq!(
         actions.first(),
@@ -402,7 +423,8 @@ fn a_resize_keeps_the_axis() {
 #[test]
 fn the_quit_command_sets_exit_and_returns_it() {
     let mut state = state_with(24, 80, 1);
-    state.update(tumu::Event::Key(prefix()));
+    // Quitting is behind the extended menu: `x` opens it, `q` picks quit.
+    run_command(&mut state, 'x');
 
     let actions = state.update(tumu::Event::Key(ch('q')));
 
@@ -504,7 +526,7 @@ fn editing_the_scrollback_follows_focus() {
 #[test]
 fn editing_the_scrollback_on_an_empty_stack_does_nothing() {
     let mut state = state_with(24, 80, 1);
-    run_command(&mut state, 'x');
+    run_ext_close(&mut state);
 
     let actions = run_command(&mut state, 'l');
 
@@ -555,7 +577,7 @@ fn pasting_the_clipboard_follows_focus() {
 #[test]
 fn pasting_the_clipboard_on_an_empty_stack_does_nothing() {
     let mut state = state_with(24, 80, 1);
-    run_command(&mut state, 'x');
+    run_ext_close(&mut state);
 
     let actions = run_command(&mut state, 'y');
 
@@ -577,6 +599,17 @@ fn run_command(state: &mut tumu::State, key: char) -> Vec<tumu::Action> {
     state.update(tumu::Event::Key(ch(key)))
 }
 
+/// Drives a close: arm the prefix, open the extended menu with `x`, press `k`.
+///
+/// Closing a sheet used to be one chord (`prefix x`); it is behind the extended
+/// menu now, so a test that wants a sheet closed has to go through the menu.
+/// The two keys are pressed with no prefix between them: the menu is modal.
+fn run_ext_close(state: &mut tumu::State) -> Vec<tumu::Action> {
+    state.update(tumu::Event::Key(prefix()));
+    state.update(tumu::Event::Key(ch('x')));
+    state.update(tumu::Event::Key(ch('k')))
+}
+
 #[test]
 fn the_first_sheet_is_focused_and_the_next_ones_take_it_over() {
     let mut state = state_with(24, 80, 1);
@@ -585,7 +618,7 @@ fn the_first_sheet_is_focused_and_the_next_ones_take_it_over() {
 
     // A new sheet goes on top and takes the keyboard with it, so the key that
     // follows lands on the sheet the user just made.
-    run_command(&mut state, 'n');
+    run_command(&mut state, 'c');
     let second = state.stack.sheets()[0].0;
     assert_eq!(state.focused, Some(second));
     assert_eq!(
@@ -640,7 +673,7 @@ fn closing_a_sheet_moves_focus_to_the_one_that_took_its_place() {
     // Focus the middle sheet and close it.
     state.focused = Some(second);
 
-    run_command(&mut state, 'x');
+    run_ext_close(&mut state);
 
     // The sheet that was third slid into the middle and is focused.
     let now_second = state.stack.sheets()[1].0;
@@ -654,7 +687,7 @@ fn closing_the_bottom_sheet_moves_focus_to_the_new_bottom() {
     let bottom = state.stack.sheets()[2].0;
     state.focused = Some(bottom);
 
-    run_command(&mut state, 'x');
+    run_ext_close(&mut state);
 
     assert_eq!(state.stack.len(), 2);
     assert_eq!(state.focused, Some(state.stack.sheets()[1].0));
@@ -664,7 +697,7 @@ fn closing_the_bottom_sheet_moves_focus_to_the_new_bottom() {
 fn closing_the_last_sheet_leaves_nothing_focused() {
     let mut state = state_with(24, 80, 1);
 
-    run_command(&mut state, 'x');
+    run_ext_close(&mut state);
 
     assert!(state.stack.is_empty());
     assert_eq!(state.focused, None);
@@ -793,7 +826,7 @@ fn exiting_the_full_screen_sheet_folds_the_stack_back() {
 fn an_empty_stack_under_full_screen_has_no_regions() {
     let mut state = state_with(24, 80, 1);
     run_command(&mut state, 'z');
-    run_command(&mut state, 'x');
+    run_ext_close(&mut state);
 
     assert!(state.regions().is_empty());
     assert_eq!(state.region_of(0), None);
@@ -991,7 +1024,7 @@ fn arming_the_prefix_opens_the_menu_and_the_next_key_closes_it() {
     assert!(state.menu, "the prefix opens the menu");
 
     // A bound key runs its command and closes the menu.
-    state.update(tumu::Event::Key(ch('x')));
+    state.update(tumu::Event::Key(ch('c')));
     assert!(!state.menu, "the chord closes the menu");
     assert!(!state.prefix, "and the latch too");
 }
@@ -1007,6 +1040,79 @@ fn an_unbound_key_closes_the_menu_and_does_nothing_else() {
     assert!(actions.is_empty(), "an unbound chord emits nothing");
     assert!(!state.menu, "but it dismisses the menu");
     assert!(!state.prefix);
+}
+
+#[test]
+fn the_ext_menu_opens_on_its_chord_and_stays_open_past_it() {
+    let mut state = state_with(24, 80, 2);
+
+    // `x` at the prefix does not close anything: it opens the extended menu.
+    run_command(&mut state, 'x');
+    assert!(state.ext_menu, "`x` opens the extended menu");
+    assert_eq!(state.stack.len(), 2, "and closes no sheet");
+
+    // The menu outlives the key that opened it, unlike the prefix menu which is
+    // the face of one latched key.
+    assert!(state.ext_menu, "the menu is still open");
+}
+
+#[test]
+fn a_key_the_ext_menu_does_not_name_dismisses_it_without_running_anything() {
+    let mut state = state_with(24, 80, 2);
+    run_command(&mut state, 'x');
+    assert!(state.ext_menu);
+
+    // `c` is bound *at the prefix* but not in the menu, so in the menu it is a
+    // "no": the menu closes and no sheet is made.
+    let actions = state.update(tumu::Event::Key(ch('c')));
+
+    assert!(actions.is_empty(), "an unbound menu key emits nothing");
+    assert!(!state.ext_menu, "but it dismisses the menu");
+    assert_eq!(state.stack.len(), 2, "and makes no sheet");
+}
+
+#[test]
+fn the_ext_menu_close_runs_and_dismisses_the_menu() {
+    let mut state = state_with(24, 80, 2);
+    let top = session(9);
+    state.stack.attach_session(0, top);
+    run_command(&mut state, 'x');
+
+    let actions = state.update(tumu::Event::Key(ch('k')));
+
+    assert_eq!(
+        actions.first(),
+        Some(&tumu::Action::CloseSession { session: top })
+    );
+    assert!(!state.ext_menu, "the command closes the menu");
+}
+
+#[test]
+fn the_ext_menu_quit_sets_exit_and_dismisses_the_menu() {
+    let mut state = state_with(24, 80, 1);
+    run_command(&mut state, 'x');
+
+    let actions = state.update(tumu::Event::Key(ch('q')));
+
+    assert_eq!(actions, vec![tumu::Action::Exit]);
+    assert!(state.exit);
+    assert!(!state.ext_menu);
+}
+
+#[test]
+fn the_prefix_is_inert_while_the_ext_menu_is_open() {
+    // The menu is modal: pressing the prefix again does not latch it, it is just
+    // another key the menu does not name, so it dismisses the menu and nothing
+    // else.
+    let mut state = state_with(24, 80, 1);
+    run_command(&mut state, 'x');
+
+    let actions = state.update(tumu::Event::Key(prefix()));
+
+    assert!(actions.is_empty());
+    assert!(!state.prefix, "the prefix does not latch inside the menu");
+    assert!(!state.ext_menu, "and dismisses it");
+    assert!(state.focused.is_some(), "no sheet was touched");
 }
 
 #[test]

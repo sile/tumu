@@ -268,6 +268,16 @@ pub fn frame(state: &State, contents: &SheetGrids) -> tuinix::Frame {
         screen.put_frame(layout.region.position, &menu_frame(&layout));
     }
 
+    // The extended menu uses the same box and is painted at the same time. The
+    // two are never shown together -- opening one dismisses the other -- so the
+    // order between them does not matter; they are drawn one after the other for
+    // the one frame a key could ask for either.
+    if state.ext_menu
+        && let Some(layout) = state.ext_menu_layout()
+    {
+        screen.put_frame(layout.region.position, &menu_frame(&layout));
+    }
+
     screen
 }
 
@@ -394,16 +404,21 @@ pub fn sheet_frame(
     frame
 }
 
-/// Paints the prefix menu into a fresh frame the size of the box.
+/// Paints a menu into a fresh frame the size of the box.
 ///
 /// The box is drawn where [`MenuLayout`](crate::MenuLayout) says: a top border, a
-/// header row naming the two columns, one row per binding, the send-prefix row,
-/// and a bottom border. Each row is painted across the box's interior width, so
-/// what is on screen is where the layout said it would be.
+/// header row naming the two columns, one row per binding, the box's trailer row
+/// if it has one (the prefix menu's send-prefix row), and a bottom border. Each
+/// row is painted across the box's interior width, so what is on screen is where
+/// the layout said it would be.
 ///
 /// The frame is the size of the box, so the renderer can compose it over the
 /// sheet frames with [`Frame::put_frame`](tuinix::Frame::put_frame) at the box's
 /// position; the rest of the screen is not part of this frame at all.
+///
+/// It draws any [`MenuLayout`](crate::MenuLayout) the same way, so the prefix
+/// menu and the extended menu share one painting routine and the two cannot
+/// drift in how a box reads -- only in which rows it holds.
 pub fn menu_frame(layout: &crate::MenuLayout) -> tuinix::Frame {
     let mut frame = tuinix::Frame::new(layout.region.size);
     let width = layout.region.size.cols;

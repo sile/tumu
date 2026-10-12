@@ -141,27 +141,32 @@ fn clicking_a_sheets_border_does_not_open_the_menu() {
 #[test]
 fn clicking_a_menu_row_neither_runs_it_nor_dismisses_the_menu() {
     // The menu is a keyboard thing: a click on a row is a click on the sheet
-    // under the box, and nothing more. `quit` is the row to aim at, because if
-    // a click *did* select, the process would be gone.
+    // under the box, and nothing more. The row to aim at is one whose command
+    // has a visible effect -- `new sheet` adds a border -- because if a click
+    // *did* select, the frame would change.
     let mut tumu = harness("menu-keys-only");
     tumu.wait_for_column_text("[C-q ...]");
     tumu.send_prefix();
-    tumu.wait_until("the menu appears", |h| h.screen_contains("┌"));
+    tumu.wait_until("the menu appears", |h| h.screen_contains("new sheet"));
 
     let row = tumu
         .screen_rows()
         .iter()
-        .position(|line| line.contains("quit"))
-        .expect("a quit row") as u16;
+        .position(|line| line.contains("new sheet"))
+        .expect("a new sheet row") as u16;
     tumu.click(row, 30);
 
-    // Still running, with the menu still up. A key still works, which is what
-    // proves the latch survived the click.
+    // Still running, with the menu still up and no second sheet made. A key
+    // still works, which is what proves the latch survived the click.
     std::thread::sleep(std::time::Duration::from_millis(200));
-    assert!(tumu.screen_contains("┌"), "the menu is still up");
+    assert!(tumu.screen_contains("new sheet"), "the menu is still up");
 
-    tumu.send_char('q');
-    tumu.wait_for_exit();
+    // `c` makes a sheet, which closes the latch with the menu and proves a key
+    // still reaches the chord table after the click.
+    tumu.send_char('c');
+    tumu.wait_until("a second sheet is made", |h| {
+        h.screen_column(39).starts_with("└ [C-q ...]")
+    });
 }
 
 /// Writes a shell script that asks for the mouse, then reports what it gets.
@@ -306,12 +311,14 @@ fn the_keyboard_follows_a_click() {
     tumu.send_char('c');
     wait_for_focus(&mut tumu, true);
 
-    // Click the lower sheet, then close it. `x` acts on the focused sheet, so
-    // the lower one must go and the upper one must take the whole terminal.
+    // Click the lower sheet, then close it. Closing is behind the extended
+    // menu -- `x` then `k` -- and acts on the focused sheet, so the lower one
+    // must go and the upper one must take the whole terminal.
     tumu.click(5, LOWER_SHEET_COL);
     wait_for_focus(&mut tumu, false);
     tumu.send_prefix();
     tumu.send_char('x');
+    tumu.send_char('k');
 
     // One sheet is left, focused, filling the terminal. Its border is now the
     // screen's last column (79), and the column the closed sheet's border used

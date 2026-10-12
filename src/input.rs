@@ -106,8 +106,8 @@ pub const BINDINGS: &[Binding] = &[
     },
     Binding {
         key: chord('x'),
-        command: Command::CloseSheet,
-        label: "close sheet",
+        command: Command::OpenExtMenu,
+        label: "ext menu",
     },
     Binding {
         key: chord('p'),
@@ -144,6 +144,33 @@ pub const BINDINGS: &[Binding] = &[
         command: Command::PasteClipboard,
         label: "paste clipboard",
     },
+];
+
+/// The chords the extended menu offers.
+///
+/// These are the commands kept out of [`BINDINGS`] because their effect is not
+/// a view change and cannot be taken back: closing a sheet ends the child in it
+/// and quitting ends everything. They are reached through `prefix x`, so a
+/// single mistyped key cannot run one -- the user has to open the menu and then
+/// pick, which is the extra step the effect deserves.
+///
+/// The table is a second one rather than a flag on a binding because the two
+/// sets are read in different modes: [`resolve_command`] answers for a latched
+/// prefix key and [`resolve_ext_command`] for a key pressed while the menu is
+/// open. Keeping them apart is what keeps a command from drifting from the mode
+/// it belongs to -- a `q` at the prefix is unbound (the prefix already carries
+/// the command), while a `q` in the menu is *quit*.
+///
+/// The keys are the mnemonic, not the effect: `q` is *quit* and `k` is *kill*,
+/// the word a process manager uses for ending what runs in a sheet. `k` is not
+/// `x` again, because the menu is a fresh set of chords and not a repeat of the
+/// one that opened it.
+pub const EXT_BINDINGS: &[Binding] = &[
+    Binding {
+        key: chord('k'),
+        command: Command::CloseSheet,
+        label: "close sheet",
+    },
     Binding {
         key: chord('q'),
         command: Command::Quit,
@@ -153,17 +180,39 @@ pub const BINDINGS: &[Binding] = &[
 
 /// Resolves a latched key to the command it names, or `None` when unbound.
 ///
-/// Only the key's `ctrl`/`code` take part: no bound key carries Alt, so an
-/// Alt-modified key is unbound rather than falling back to the bare chord, as
-/// in `kk`. The prefix itself is handled by the caller (it becomes
-/// *send-prefix*), so it is not listed here.
+/// It reads [`BINDINGS`], the prefix's own table. Only the key's `ctrl`/`code`
+/// take part: no bound key carries Alt, so an Alt-modified key is unbound rather
+/// than falling back to the bare chord, as in `kk`. The prefix itself is handled
+/// by the caller (it becomes *send-prefix*), so it is not listed here.
 pub fn resolve_command(key: tuinix::KeyInput) -> Option<Command> {
+    resolve_in(BINDINGS, key)
+}
+
+/// Resolves a key pressed while the extended menu is open to its command, or
+/// `None` when it is not one of the menu's chords.
+///
+/// It reads [`EXT_BINDINGS`], the menu's own table, so the keys that close a
+/// sheet or quit are live only in the menu and unknown at the prefix. Like
+/// [`resolve_command`] an Alt-modified key is unbound rather than falling back
+/// to the bare chord, and `None` is what closes the menu without running
+/// anything: a key the menu does not name is a "no", not a command.
+pub fn resolve_ext_command(key: tuinix::KeyInput) -> Option<Command> {
+    resolve_in(EXT_BINDINGS, key)
+}
+
+/// Looks `key` up in `bindings`, the one lookup both modes share.
+///
+/// The two resolvers differ only in which table they read, so the matching
+/// lives here once: a key is the bound one when its `ctrl` and `code` agree and
+/// it carries no Alt. Alt is rejected in both modes, so `Alt-<char>` is never a
+/// chord -- see [`resolve_command`].
+fn resolve_in(bindings: &[Binding], key: tuinix::KeyInput) -> Option<Command> {
     if key.alt {
         return None;
     }
     let tuinix::KeyInput { ctrl, code, .. } = key;
 
-    BINDINGS
+    bindings
         .iter()
         .find(|binding| {
             let tuinix::KeyInput {

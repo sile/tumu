@@ -82,9 +82,11 @@ fn closing_the_focused_sheet_grows_the_rest() {
         h.screen_column(39).starts_with("└ [C-q ...]") && h.screen_column(79).starts_with("└")
     });
 
-    // Close the focused sheet: the one on top.
+    // Close the focused sheet: the one on top. `x` does not close it -- it
+    // opens the extended menu -- so the close is `x` then `k`.
     tumu.send_prefix();
     tumu.send_char('x');
+    tumu.send_char('k');
 
     // Back to one sheet filling the terminal, so its border is now the screen's
     // *last* column (79) and the column it used to end at (39) is content.
@@ -188,8 +190,30 @@ fn the_quit_command_exits() {
     let mut tumu = harness("quit");
     tumu.wait_for_column_text("[C-q ...]");
 
+    // Quitting is behind the extended menu too, so `x` opens it and `q` quits.
     tumu.send_prefix();
+    tumu.send_char('x');
     tumu.send_char('q');
 
     tumu.wait_for_exit();
+}
+
+#[test]
+fn the_extended_menu_opens_and_a_stray_key_dismisses_it() {
+    let mut tumu = harness("ext-menu");
+    tumu.wait_for_column_text("[C-q ...]");
+
+    // `x` does not close the sheet: it opens the extended menu, whose two rows
+    // name the commands the prefix no longer carries.
+    tumu.send_prefix();
+    tumu.send_char('x');
+    tumu.wait_for_text("close sheet");
+    assert!(tumu.screen_contains("quit"), "the menu lists quit");
+
+    // Any key the menu does not name dismisses it and does nothing else, so a
+    // stray press cannot run the command the menu was guarding.
+    tumu.send_char('y');
+    tumu.wait_until("the menu is gone", |h| !h.screen_contains("close sheet"));
+    // The sheet is still there: the frame still carries its border label.
+    tumu.wait_for_column_text("[C-q ...]");
 }

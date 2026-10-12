@@ -170,7 +170,7 @@ the two never collide: any character may be the prefix, even one a chord uses,
 and the setting needs no check against the binding table.
 
 - `prefix c` -- new sheet on top
-- `prefix x` -- close the focused sheet
+- `prefix x` -- open the extended menu (see below)
 - `prefix p` -- move the focus up (vertical) / left (horizontal)
 - `prefix n` -- move the focus down (vertical) / right (horizontal)
 - `prefix o` -- move the focused sheet to the bottom
@@ -178,14 +178,36 @@ and the setting needs no check against the binding table.
 - `prefix z` -- show the focused sheet full screen, and back
 - `prefix l` -- open the focused sheet's scrollback in an editor (see below)
 - `prefix y` -- paste the clipboard into the focused sheet (see below)
-- `prefix q` -- quit
 - any other key -- sent to the focused sheet
 - `prefix prefix` -- send the prefix itself to the focused sheet (send-prefix)
 
+### The extended menu
+
+Two of the commands cannot be taken back: closing a sheet ends the child running
+in it, and quitting ends everything. They are one step removed from the prefix,
+so a single mistyped key cannot run one. `prefix x` opens the **extended menu**,
+a second box with its own chords:
+
+- `k` -- close the focused sheet (`k` for *kill*)
+- `q` -- quit
+
+The menu is modal: while it is open the prefix is inert and a key is one of the
+menu's chords or nothing. One key closes it, the way the prefix latch does, so
+a key the menu does not name is a "no" that dismisses it -- never a command.
+That is the whole point: the user reads a row and picks, and a stray press
+costs a dismissal rather than a sheet.
+
+A menu rather than a yes/no prompt, because a prompt asks the *same* question
+every time and can be answered by muscle memory, while a menu makes the user
+read a different row before choosing. It is the shape `kk`'s ext mode has. The
+menu is shown only when the box fits, so on a very small screen these commands
+are unreachable rather than offered unreadably.
+
 The focused sheet is the sheet the commands act on and the one the keyboard is
-sent to. A new sheet goes on top and takes the focus; `prefix o` and
-`prefix x` move it to the sheet that takes the focused one's place, so the
-stack comes up under the keyboard rather than the keyboard moving away.
+sent to. A new sheet goes on top and takes the focus; `prefix o`, and closing a
+sheet through the extended menu, move it to the sheet that takes the focused
+one's place, so the stack comes up under the keyboard rather than the keyboard
+moving away.
 
 `prefix n` and `prefix p` move the focus one place along the stack, in the
 direction the stack advances: `n` is *next* (down when the sheets run down the
@@ -298,7 +320,7 @@ the center of the terminal:
 ```
    ┌───────────────────┐
    │ c    new sheet    │
-   │ x    ...          │
+   │ x    ext menu     │
    | p    ...          |
    | n    ...          |
    | ...               |
@@ -310,6 +332,11 @@ The menu lists every prefix chord. Its rows come from the same table the keys
 are resolved from, so a chord cannot be bound without appearing in the menu, or
 listed without being bound. A command is run by pressing its key. If an unbound
 key is pressed, the menu is closed and nothing else happens.
+
+The one row that is not a chord is `send prefix`: it stands for the prefix
+pressed twice, which sends the prefix itself to the focused sheet. The extended
+menu is the same box built from its own, shorter table; see
+*The extended menu* above.
 
 The menu is chosen with the keyboard: a click is not a selection, here or
 anywhere else in tumu, so a click on a row is a click on the sheet under the box
@@ -362,7 +389,7 @@ Known issues
 - A sheet whose `prefix l` editor fails to launch (a `$TUMU_EDITOR` that is
   missing, not executable, or does not accept `--tail`) stays in the stack as an
   empty sheet and cannot be closed by typing to it, because it has no child to
-  type to. It is closed like any other sheet, with `prefix x`.
+  type to. It is closed like any other sheet, with `prefix x` then `k`.
 - Only the *focused* sheet's reports are forwarded. A background sheet gets
   nothing while it is not focused -- the same as the keyboard -- even if its
   child asked for the mouse, so a tracking program in a background sheet does not

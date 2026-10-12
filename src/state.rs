@@ -73,6 +73,23 @@ pub struct State {
     /// out.
     pub menu: bool,
 
+    /// Whether the extended menu is open.
+    ///
+    /// It is the second row of commands -- the ones whose effect cannot be
+    /// taken back ([`CloseSheet`](Command::CloseSheet),
+    /// [`Quit`](Command::Quit)) -- and it is *modal*: while it is open a key is
+    /// resolved against [`EXT_BINDINGS`](crate::EXT_BINDINGS) alone, so the
+    /// prefix is inert and a chord means the menu's command or nothing. One key
+    /// closes it, the way the prefix latch does, so opening it and then deciding
+    /// against it costs one press.
+    ///
+    /// Unlike [`menu`](State::menu) it is not opened by the latch: it is opened
+    /// by [`OpenExtMenu`](Command::OpenExtMenu) and lives past the key that
+    /// opened it, which is what makes it a step rather than a chord. It is still
+    /// a *view* -- no sheet's region changes and nothing has to be put back --
+    /// and it is painted over the composed screen like the prefix menu.
+    pub ext_menu: bool,
+
     /// Whether the focused sheet's child is asking for the mouse.
     ///
     /// It is *the focused sheet's* ask, not a per-session fact, because the mouse
@@ -134,6 +151,7 @@ impl State {
             prefix_char: crate::input::DEFAULT_PREFIX_CHAR,
             orientation: crate::Orientation::DEFAULT,
             menu: false,
+            ext_menu: false,
             mouse_wanted: false,
             held_button: None,
             full_screen: false,
@@ -186,6 +204,17 @@ impl State {
     /// command was clicked.
     pub fn menu_layout(&self) -> Option<crate::MenuLayout> {
         crate::menu_layout(self.size, &crate::input::prefix_key_text(self.prefix_char))
+    }
+
+    /// Returns the extended menu's layout at the current size, or `None` when it
+    /// does not fit.
+    ///
+    /// The second menu's geometry, derived the same way: the renderer and
+    /// [`handle_mouse`](State::handle_mouse) read it, so a click and the box on
+    /// screen agree. The prefix character does not enter it, because the extended
+    /// menu does not list a prefix chord.
+    pub fn ext_menu_layout(&self) -> Option<crate::MenuLayout> {
+        crate::ext_menu_layout(self.size)
     }
 
     /// Returns the index of the focused sheet, or `None` when there is none.
@@ -406,6 +435,20 @@ impl State {
     /// what the next key means are never out of step. A forwarded key is dropped
     /// when the stack is empty, rather than sent to nowhere.
     fn handle_key(&mut self, key: tuinix::KeyInput) -> Vec<Action> {
+        // The extended menu is modal and is checked first, so while it is open
+        // the prefix is inert and the chord table is the menu's own. One key
+        // closes it, whatever the key is: a command the menu names runs, and any
+        // other key is a "no" that dismisses it. That is the whole point of the
+        // menu -- the user reads a row and picks, and a key they did not mean is
+        // a dismissal, never a command.
+        if self.ext_menu {
+            self.ext_menu = false;
+            return match crate::input::resolve_ext_command(key) {
+                Some(command) => self.handle_command(command),
+                None => Vec::new(),
+            };
+        }
+
         if !self.prefix {
             if crate::input::is_prefix(self.prefix_char, key) {
                 self.prefix = true;
@@ -462,6 +505,7 @@ impl State {
             Command::ToggleFullScreen => self.handle_toggle_full_screen(),
             Command::EditScrollback => self.handle_edit_scrollback(),
             Command::PasteClipboard => self.handle_paste_clipboard(),
+            Command::OpenExtMenu => self.handle_open_ext_menu(),
             Command::Quit => {
                 self.exit = true;
                 vec![Action::Exit]
@@ -597,9 +641,9 @@ impl State {
     /// one no-op. A sheet whose session has no scrollback to offer still gets an
     /// editor, on an empty file.
     ///
-    /// Focus moves to the editor sheet, so closing it (with `prefix x`, or by
-    /// quitting the editor) leaves the keyboard on the sheet the editor was
-    /// opened *from*.
+    /// Focus moves to the editor sheet, so closing it (through the extended
+    /// menu, or by quitting the editor) leaves the keyboard on the sheet the
+    /// editor was opened *from*.
     fn handle_edit_scrollback(&mut self) -> Vec<Action> {
         let Some(index) = self.focused_index() else {
             return Vec::new();
@@ -670,6 +714,27 @@ impl State {
             return Vec::new();
         };
         vec![Action::PasteClipboard { index }]
+    }
+
+    /// Opens the extended menu, if it will fit on screen.
+    ///
+    /// It is a *view* like the prefix menu: no region changes and no session is
+    /// resized, so the only thing to do is raise the flag -- which is why no
+    /// action is returned and the edge repaints because the frame changed.
+    ///
+    /// The flag is raised only when the box fits, exactly as the prefix menu is
+    /// shown only when it fits: the flag tracks what is on screen, so a key
+    /// pressed at the menu is a key at a menu the user can read. A screen too
+    /// small leaves the flag clear and the commands unreachable, which is the
+    /// safe side of the trade -- an unreadable menu can only invite the mistake
+    /// the menu exists to prevent.
+    ///
+    /// Opening it clears the prefix latch's menu, since the two are never open
+    /// together: the extended menu is opened *by* a chord, which has already
+    /// dismissed the latch, and it is modal from the next key on.
+    fn handle_open_ext_menu(&mut self) -> Vec<Action> {
+        self.ext_menu = self.ext_menu_layout().is_some();
+        Vec::new()
     }
 
     /// Stacks the sheets the other way and resizes every sheet to match.

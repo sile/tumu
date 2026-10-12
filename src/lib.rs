@@ -43,10 +43,10 @@ pub use geometry::{
 };
 pub use id::{SheetId, TermnixSessionId};
 pub use input::{
-    BINDINGS, Binding, DEFAULT_PREFIX_CHAR, SCROLLBACK_FILE_PREFIX, is_prefix, prefix_key,
-    prefix_key_text,
+    BINDINGS, Binding, DEFAULT_PREFIX_CHAR, EXT_BINDINGS, SCROLLBACK_FILE_PREFIX, is_prefix,
+    prefix_key, prefix_key_text,
 };
-pub use menu::{MenuLayout, MenuRow, SEND_PREFIX_LABEL, chord_text, menu_layout};
+pub use menu::{MenuLayout, MenuRow, SEND_PREFIX_LABEL, chord_text, ext_menu_layout, menu_layout};
 pub use orientation::Orientation;
 pub use ratio::Ratio;
 pub use render::{

@@ -110,3 +110,44 @@ fn the_row_commands_are_every_binding_exactly_once() {
 
     assert_eq!(listed, bound, "the menu shows exactly the bound commands");
 }
+
+#[test]
+fn the_ext_menu_lists_the_ext_bindings_and_no_trailer() {
+    let layout = tumu::ext_menu_layout(size(40, 80)).expect("the ext menu fits 40x80");
+
+    // A header, the ext bindings, and no send-prefix row: the prefix is not part
+    // of this menu.
+    assert_eq!(layout.rows.len(), tumu::EXT_BINDINGS.len() + 1);
+    assert_eq!(layout.rows[0].command, None, "the header selects nothing");
+    for (row, binding) in layout.rows[1..].iter().zip(tumu::EXT_BINDINGS) {
+        assert_eq!(row.command, Some(binding.command));
+        assert_eq!(row.label, binding.label);
+        assert_eq!(row.key, tumu::chord_text(binding));
+    }
+}
+
+#[test]
+fn the_ext_menu_holds_the_commands_the_prefix_menu_does_not() {
+    // The two menus are disjoint: a command is reachable either at the prefix or
+    // in the menu, never both, which is what makes the menu a real second row
+    // rather than a copy.
+    let prefix = tumu::menu_layout(size(40, 80), PREFIX).expect("the menu fits 40x80");
+    let ext = tumu::ext_menu_layout(size(40, 80)).expect("the ext menu fits 40x80");
+
+    let prefix_commands: Vec<tumu::Command> =
+        prefix.rows.iter().filter_map(|row| row.command).collect();
+    for row in &ext.rows {
+        if let Some(command) = row.command {
+            assert!(
+                !prefix_commands.contains(&command),
+                "{command:?} is in both menus"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_ext_menu_is_not_laid_out_when_the_screen_is_too_small() {
+    assert!(tumu::ext_menu_layout(size(40, 4)).is_none());
+    assert!(tumu::ext_menu_layout(size(2, 80)).is_none());
+}
