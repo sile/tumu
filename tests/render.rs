@@ -252,6 +252,7 @@ fn a_full_screen_sheet_draws_no_border_and_contents_fill_the_terminal() {
     let rows: Vec<&[Cell]> = deep.iter().map(|row| row.as_slice()).collect();
     let grid = tumu::SheetGrid {
         rows,
+        history_rows: 0,
         cursor: termnix::Position { row: 0, col: 0 },
         cursor_visible: false,
     };
@@ -315,6 +316,7 @@ fn contents_are_painted_to_the_left_of_the_border_and_clipped_at_the_sheet_edge(
     let rows = vec![long.as_slice()];
     let grid = tumu::SheetGrid {
         rows,
+        history_rows: 0,
         cursor: termnix::Position { row: 0, col: 0 },
         cursor_visible: false,
     };

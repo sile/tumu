@@ -44,7 +44,17 @@ use crate::State;
 /// frame it is painted into. A row shorter than the frame leaves the rest of
 /// the row as it was; a longer row is clipped.
 pub struct SheetGrid<'a> {
-    /// The visible rows, top to bottom.
+    /// The rows to paint, top to bottom.
+    ///
+    /// These are the rows the sheet shows, most recent at the bottom. When the
+    /// sheet's content region is shorter than the session's visible grid -- the
+    /// session was just shrunk and its older visible rows moved into history --
+    /// the rows here begin with the tail of that history (see `history_rows`),
+    /// so the region stays filled and a row that scrolled out of the grid is
+    /// still shown rather than left blank. There are therefore never more rows
+    /// here than the content region has lines: the edge trims to that before
+    /// handing the grid over, bottom-aligned, so the top of the region is the
+    /// oldest row still shown and the bottom is the newest.
     ///
     /// This is owned rather than a slice because [`Session`](termnix::Session)
     /// exposes its rows as an *iterator* of borrowed slices, not as a slice: the
@@ -53,7 +63,20 @@ pub struct SheetGrid<'a> {
     /// grid is cheap to build and the session's memory is never copied.
     pub rows: Vec<&'a [termnix::Cell]>,
 
-    /// The cursor position, relative to the grid's top-left corner.
+    /// How many of the leading entries in `rows` came from scrollback rather
+    /// than from the session's visible grid.
+    ///
+    /// The visible grid's own top row is therefore at index `history_rows`, and
+    /// the cursor -- whose position is in visible-grid coordinates -- sits that
+    /// many rows further down the painted region. A grid handed over with no
+    /// history in front of it sets this to `0`.
+    pub history_rows: usize,
+
+    /// The cursor position, relative to the visible grid's top-left corner.
+    ///
+    /// This is the session's own cursor, not a position in `rows`: the edge
+    /// that fills a grid in adds `history_rows` when it needs the cursor's place
+    /// in the painted region.
     pub cursor: termnix::Position,
 
     /// Whether the cursor should be drawn. A hidden cursor is not shown even

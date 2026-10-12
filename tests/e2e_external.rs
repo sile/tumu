@@ -78,7 +78,16 @@ fn the_tool_sheet_stacks_on_top_and_the_shell_stays_below() {
     // focused loses the label and the tool sheet takes it. 40x30 is taller than
     // wide, so the stack runs vertically and the tool sheet takes the rows above
     // the shell's.
-    let shell = script("stack-shell", "echo SHELL-RUNNING; exec sleep 30");
+    //
+    // The shell keeps printing after the tool opens, so its region has fresh
+    // output at the bottom when the stack splits and the shell's region shrinks:
+    // a sheet shows the *newest* lines of its history (see `grid_of`), so a lone
+    // line printed before the split would have scrolled into history and left the
+    // region blank.
+    let shell = script(
+        "stack-shell",
+        "echo SHELL-RUNNING; while true; do echo SHELL-STILL-HERE; sleep 0.1; done",
+    );
     let tool = script("stack-tool", "echo DIFF-TOOL-RUNNING; exec sleep 30");
 
     let mut tumu = e2e::TumuHarness::with_args(40, 30, {
@@ -108,11 +117,11 @@ fn the_tool_sheet_stacks_on_top_and_the_shell_stays_below() {
         "the tool's sheet carries the label:\n{}",
         tumu.screen_text()
     );
-    assert!(
-        tumu.screen_contains("SHELL-RUNNING"),
-        "the shell's sheet stays below:\n{}",
-        tumu.screen_text()
-    );
+    // The shell's output has to reach the bottom of its region, which takes a
+    // few prints while its session is still taller than the region.
+    tumu.wait_until("the shell's sheet stays below and keeps painting", |h| {
+        h.screen_contains("SHELL-STILL-HERE")
+    });
 }
 
 #[test]

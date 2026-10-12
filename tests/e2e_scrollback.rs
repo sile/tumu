@@ -68,15 +68,27 @@ fn the_editor_receives_the_sheet_scrollback_and_closes_on_exit() {
     });
 
     // The editor's own exit closes its sheet through the ordinary session-exit
-    // path, so the stack is back to the one sheet it started with: the shell's
-    // label is on screen again.
-    tumu.wait_for_text("SHEET-HELLO");
+    // path, so the stack is back to the one sheet it started with: the label is
+    // on the only border there is, the last row.
+    tumu.wait_until("the shell is the only sheet again", |h| {
+        let rows = h.screen_rows();
+        rows[rows.len() - 1].starts_with("└ [C-q ...]")
+    });
 }
 
 #[test]
 fn the_editor_opens_in_a_new_sheet_above_the_one_it_came_from() {
     // The editor stays alive, so its sheet is still up while it is asserted on.
-    let shell = script("editor-sheet-shell", "echo SHEET-HELLO; exec sleep 30");
+    //
+    // The shell keeps printing after the editor opens, so its region has fresh
+    // output at the bottom when the stack splits and the shell's region shrinks:
+    // a sheet shows the *newest* lines of its history (see `grid_of`), so a lone
+    // line printed before the split would have scrolled into history and left the
+    // region blank.
+    let shell = script(
+        "editor-sheet-shell",
+        "echo SHEET-HELLO; while true; do echo SHELL-STILL-HERE; sleep 0.1; done",
+    );
     let editor = script("editor-sheet-editor", "echo EDITOR-RUNNING; exec sleep 30");
 
     // A 40x30 terminal is taller than wide, so the stack runs vertically and the
@@ -108,12 +120,12 @@ fn the_editor_opens_in_a_new_sheet_above_the_one_it_came_from() {
         "the editor's sheet carries the label:\n{}",
         tumu.screen_text()
     );
-    // The sheet the editor came from is still there, below, with its output.
-    assert!(
-        tumu.screen_contains("SHEET-HELLO"),
-        "the shell's sheet stays below:\n{}",
-        tumu.screen_text()
-    );
+    // The sheet the editor came from is still there, below, still painting.
+    // The shell's output has to reach the bottom of its region, which takes a
+    // few prints while its session is still taller than the region.
+    tumu.wait_until("the shell's sheet stays below and keeps painting", |h| {
+        h.screen_contains("SHELL-STILL-HERE")
+    });
 }
 
 /// Prints `count` numbered markers, then waits so they stay in the history.

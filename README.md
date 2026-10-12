@@ -294,6 +294,27 @@ nowhere to go, so `prefix t` on it does nothing.
 terminal while the others keep their places, and clearing the flag brings the
 same layout straight back.
 
+What a sheet shows when the layout changes
+------------------------------------------
+
+A sheet's region is its own little terminal, and the session behind it is a
+child with its own size. When the stack is re-laid out -- a new sheet opens, one
+closes, `prefix t` moves one, the axis or the odds change, the terminal itself
+resizes -- every region takes a new shape and the children are resized to match
+(`SIGWINCH` to each). A child that keeps a screen full of text repaints itself at
+the new size, so what it drew last is still there.
+
+The session's grid and the region rarely agree at the instant of a change: the
+child has not repainted yet, or it never will (a program that printed a log and
+went quiet). A sheet shows the *newest* lines of its content -- the tail of the
+scrollback first, then the bottom of the visible grid -- anchored to the bottom
+of the region. So shrinking a region does not blank it: the lines that no longer
+fit fall off the top into history rather than being lost, and growing one fills
+the new space from history. This is the tmux behavior of redrawing from
+scrollback, without re-wrapping: a line keeps the width it had when it was
+pushed off, so a row that was wider or narrower than the region today is clipped
+or padded rather than re-flowed.
+
 Copy mode (PoC)
 ---------------
 

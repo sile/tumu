@@ -1085,13 +1085,20 @@ impl App {
             return None;
         }
         let cursor = terminal.cursor();
-        if usize::from(cursor.row) >= content_size.rows
-            || usize::from(cursor.col) >= content_size.cols
-        {
+        // The cursor is in visible-grid coordinates, but the region shows a
+        // bottom-aligned window onto history-then-grid (see `grid_of`). The same
+        // window `grid_of` builds decides where the cursor lands: it moves down
+        // by the history rows shown in front of the grid, and up by any visible
+        // rows cut off the top. A row is only shown when it survives that
+        // window, so a cursor on a row that scrolled off is not drawn.
+        let window = ContentWindow::of(content_size.rows, terminal.rows().count());
+        let row = i64::from(cursor.row) + window.painted_offset();
+        let row = usize::try_from(row).ok()?;
+        if row >= content_size.rows || usize::from(cursor.col) >= content_size.cols {
             return None;
         }
         Some(tuinix::Position {
-            row: region.position.row + content_origin.row + usize::from(cursor.row),
+            row: region.position.row + content_origin.row + row,
             col: region.position.col + content_origin.col + usize::from(cursor.col),
         })
     }
@@ -1106,11 +1113,45 @@ impl App {
     /// borrowed slices rather than a slice. The cells are still borrowed, so the
     /// grid is cheap and the session's memory is never copied; the `Vec` is
     /// rebuilt per frame, which is fine at this size.
-    fn grid_of(&self, id: tumu::TermnixSessionId) -> Option<tumu::SheetGrid<'_>> {
+    ///
+    /// `content_rows` is how many lines the sheet's content region has. The
+    /// session's visible grid rarely matches that exactly: a shrink changes the
+    /// region without shrinking the grid in step, because a session that received
+    /// bytes keeps its height until its child repaints at the new size. So the
+    /// region is a bottom-aligned window onto history-then-grid (see
+    /// [`ContentWindow`]): when the grid is taller than the region the newest
+    /// `content_rows` grid rows are shown, and when the grid is shorter the tail
+    /// of the scrollback fills the space above it. Anchoring to the bottom this
+    /// way is what keeps a row that scrolled out of the grid -- rather than
+    /// leaving the region blank -- while never showing an older row over a newer
+    /// one.
+    fn grid_of(
+        &self,
+        id: tumu::TermnixSessionId,
+        content_rows: usize,
+    ) -> Option<tumu::SheetGrid<'_>> {
         let session = self.sessions.get(&id)?;
         let terminal = session.terminal_state();
+
+        let visible: Vec<&[termnix::Cell]> = terminal.rows().collect();
+        let window = ContentWindow::of(content_rows, visible.len());
+
+        // A bottom-aligned window onto history-then-grid: as much of the tail of
+        // the scrollback as fits in front, then the visible rows the window
+        // keeps. Either `history_rows` or `visible_from` is zero, never both.
+        let history = terminal.scrollback_lines();
+        let mut rows: Vec<&[termnix::Cell]> =
+            Vec::with_capacity(window.history_rows + visible.len() - window.visible_from);
+        if window.history_rows > 0 {
+            for line in history.iter().skip(history.len() - window.history_rows) {
+                rows.push(line.cells());
+            }
+        }
+        rows.extend_from_slice(&visible[window.visible_from..]);
+
         Some(tumu::SheetGrid {
-            rows: terminal.rows().collect(),
+            rows,
+            history_rows: window.history_rows,
             cursor: terminal.cursor(),
             cursor_visible: terminal.modes().cursor_visible,
         })
@@ -1122,10 +1163,18 @@ impl App {
     /// the core never has to look a sheet's session up to know which grid is
     /// its. A sheet with no session -- one whose child has not been spawned yet,
     /// or has exited -- contributes `None`, which draws its border alone.
+    ///
+    /// Each grid is trimmed to its sheet's content region (see `grid_of`), so
+    /// the region is read here once and handed in rather than recomputed for
+    /// every session.
     fn sheet_grids(&self) -> tumu::SheetGrids<'_> {
         let mut grids = tumu::SheetGrids::new();
-        for (_, sheet) in self.state.stack.sheets() {
-            grids.push(sheet.session.and_then(|id| self.grid_of(id)));
+        for (index, (_, sheet)) in self.state.stack.sheets().iter().enumerate() {
+            let content_rows = self
+                .state
+                .content_region_of(index)
+                .map_or(0, |region| region.size.rows);
+            grids.push(sheet.session.and_then(|id| self.grid_of(id, content_rows)));
         }
         grids
     }
@@ -1159,6 +1208,50 @@ impl App {
             rows.push(row_text(row));
         }
         Some(rows.join("\n"))
+    }
+}
+
+/// How a sheet's content region maps onto a session's history-then-grid.
+///
+/// A region shows the newest `content_rows` rows of the session, anchored to
+/// the bottom: the vertical scrollback, newest first, then the visible grid.
+/// The region's height and the grid's height rarely agree -- a shrink changes
+/// the region without shrinking the grid, and the child later repaints at the
+/// new size -- so either the grid is taller than the region and its oldest rows
+/// are cut off the top, or the region is taller than the grid and the tail of
+/// the scrollback fills the space above it. This holds which of those two
+/// happens and by how much; `grid_of` builds the rows from it and
+/// `focused_cursor` uses it to place the cursor.
+struct ContentWindow {
+    /// Rows of the region filled from the tail of the scrollback, in front of
+    /// the grid. Zero when the grid fills the region or overflows it.
+    history_rows: usize,
+    /// The first index of the visible grid that the region shows. Zero when the
+    /// grid fits and the history fills the gap.
+    visible_from: usize,
+}
+
+impl ContentWindow {
+    /// Computes the window showing `content_rows` lines of a grid `grid_rows`
+    /// tall, bottom-aligned.
+    fn of(content_rows: usize, grid_rows: usize) -> Self {
+        if grid_rows >= content_rows {
+            Self {
+                history_rows: 0,
+                visible_from: grid_rows - content_rows,
+            }
+        } else {
+            Self {
+                history_rows: content_rows - grid_rows,
+                visible_from: 0,
+            }
+        }
+    }
+
+    /// How far a visible-grid row moves in the painted region: down by the
+    /// history rows shown above the grid, up by the grid rows cut off the top.
+    fn painted_offset(&self) -> i64 {
+        self.history_rows as i64 - self.visible_from as i64
     }
 }
 
@@ -1251,5 +1344,35 @@ mod tests {
     fn row_text_of_all_blanks_is_empty() {
         let cells = [cell(' ', 1), cell(' ', 1)];
         assert_eq!(row_text(&cells), "");
+    }
+
+    #[test]
+    fn a_grid_taller_than_the_region_is_cut_at_the_top() {
+        // The region keeps the newest rows: the oldest visible rows fall off the
+        // top, and no history is shown because the grid already fills the space.
+        let window = ContentWindow::of(3, 10);
+        assert_eq!(window.history_rows, 0);
+        assert_eq!(window.visible_from, 7);
+        assert_eq!(window.painted_offset(), -7);
+    }
+
+    #[test]
+    fn a_region_taller_than_the_grid_is_filled_from_history() {
+        // The grid is shorter than the region, so the tail of the scrollback
+        // fills the space above it and none of the grid is cut.
+        let window = ContentWindow::of(10, 3);
+        assert_eq!(window.history_rows, 7);
+        assert_eq!(window.visible_from, 0);
+        assert_eq!(window.painted_offset(), 7);
+    }
+
+    #[test]
+    fn a_grid_exactly_the_region_height_shows_the_grid_whole() {
+        // The common case: the region and the grid agree, so the window is the
+        // grid itself and a visible row does not move.
+        let window = ContentWindow::of(5, 5);
+        assert_eq!(window.history_rows, 0);
+        assert_eq!(window.visible_from, 0);
+        assert_eq!(window.painted_offset(), 0);
     }
 }
