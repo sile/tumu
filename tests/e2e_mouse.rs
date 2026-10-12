@@ -1,4 +1,4 @@
-//! End-to-end tests for mouse handling: a click moves focus.
+//! End-to-end tests for mouse handling: a click moves focus, and nothing else.
 //!
 //! These drive the real binary through mouse reports, the way a terminal would,
 //! and read the resulting grid back. Focus is visible in the border -- only the
@@ -110,6 +110,143 @@ fn a_click_does_not_disturb_the_layout() {
     // same two columns, so neither sheet was moved or resized.
     assert!(tumu.screen_column(UPPER_BORDER_COL).starts_with("└"));
     assert!(tumu.screen_column(LOWER_BORDER_COL).starts_with("└"));
+}
+
+#[test]
+fn clicking_a_sheets_border_does_not_open_the_menu() {
+    // The border carries the command label, but the label is not a target: the
+    // menu belongs to the prefix key, so a click on the line only lands on the
+    // sheet under it. The border column of the lower sheet is 79.
+    let mut tumu = harness("border-no-menu");
+    tumu.wait_for_column_text("[C-q ...]");
+
+    tumu.click(5, LOWER_BORDER_COL);
+
+    // The menu never appears, and nothing else changed either: one sheet, still
+    // focused, still filling the terminal.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    assert!(!tumu.screen_contains("┌"), "no menu from a border click");
+    tumu.wait_until("still one focused sheet", |h| {
+        h.screen_column(LOWER_BORDER_COL).starts_with("└ [C-q ...]")
+    });
+}
+
+#[test]
+fn clicking_a_menu_row_neither_runs_it_nor_dismisses_the_menu() {
+    // The menu is a keyboard thing: a click on a row is a click on the sheet
+    // under the box, and nothing more. `quit` is the row to aim at, because if
+    // a click *did* select, the process would be gone.
+    let mut tumu = harness("menu-keys-only");
+    tumu.wait_for_column_text("[C-q ...]");
+    tumu.send_prefix();
+    tumu.wait_until("the menu appears", |h| h.screen_contains("┌"));
+
+    let row = tumu
+        .screen_rows()
+        .iter()
+        .position(|line| line.contains("quit"))
+        .expect("a quit row") as u16;
+    tumu.click(row, 30);
+
+    // Still running, with the menu still up. A key still works, which is what
+    // proves the latch survived the click.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    assert!(tumu.screen_contains("┌"), "the menu is still up");
+
+    tumu.send_char('q');
+    tumu.wait_for_exit();
+}
+
+/// Writes a shell script that asks for the mouse, then reports what it gets.
+///
+/// The script turns on SGR mouse reporting with the DECSET escape a real program
+/// uses, prints a marker so the test knows the ask has landed, and then runs a
+/// one-line `cat`-like reader in the shell: the report tumu forwards arrives on
+/// the script's standard input, and the shell echoes it back to the screen. What
+/// the test reads back is therefore the bytes the *child* received, not the
+/// bytes the host sent.
+fn mouse_asking_shell(name: &str) -> PathBuf {
+    let path =
+        std::env::temp_dir().join(format!("tumu-mouse-ask-{}-{}.sh", std::process::id(), name));
+    // `?1000h` is plain tracking and `?1006h` selects SGR; together they are what
+    // an application turns on when it wants the mouse. `read` takes one line and
+    // `od` prints it, so the report's exact bytes are on screen.
+    let body = concat!(
+        "#!/bin/sh\n",
+        "printf '\\033[?1000h\\033[?1006h'\n",
+        "printf 'MOUSE-ASKED\\n'\n",
+        "IFS= read -r line\n",
+        "printf '%s\\n' \"$line\" | od -An -c\n",
+        "exec sleep 30\n",
+    );
+    fs::write(&path, body).expect("failed to write the test script");
+    let mut perms = fs::metadata(&path).expect("stat the script").permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+    fs::set_permissions(&path, perms).expect("chmod the script");
+    path
+}
+
+#[test]
+fn a_child_that_asks_for_the_mouse_receives_the_report() {
+    // One sheet, 40x30 -- taller than wide, so the stack runs vertically and the
+    // border is the last row. Clicking inside the content area with no focus
+    // change to make is the cleanest case: with the child asking, the report is
+    // the child's.
+    let shell = mouse_asking_shell("receives");
+    let mut tumu = e2e::TumuHarness::with_shell(30, 40, shell.to_str().expect("utf-8 path"));
+    tumu.wait_for_text("MOUSE-ASKED");
+
+    tumu.click(5, 10);
+
+    // The child read a line and echoed it: an SGR mouse report for a left press
+    // at the cell the click landed on. Row 5 and column 10 are zero-based in
+    // tumu's coordinates and one-based in the wire form, so the report names
+    // column 11 and row 6.
+    tumu.wait_until("the child sees the report", |h| {
+        h.screen_text().contains(";11;6M")
+    });
+}
+
+#[test]
+fn a_child_that_has_not_asked_never_sees_a_report() {
+    // The same script but with the DECSET escaped so the child never asks. The
+    // click must move the focus (a no-op here, there is one sheet) and reach no
+    // child: the marker is the last thing on the grid.
+    let shell = script_without_ask("ignores");
+    let mut tumu = e2e::TumuHarness::with_shell(30, 40, shell.to_str().expect("utf-8 path"));
+    tumu.wait_for_text("MOUSE-ASKED");
+
+    tumu.click(5, 10);
+
+    // Give the binary time to forward it if it were going to, then assert the
+    // child's reader is still waiting: no `od` output, so no report arrived.
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert!(
+        !tumu.screen_text().contains(";11;6M"),
+        "no report reaches a child that did not ask:\n{}",
+        tumu.screen_text()
+    );
+}
+
+/// The mouse-asking script with the DECSET removed, so nothing asks.
+fn script_without_ask(name: &str) -> PathBuf {
+    let path = std::env::temp_dir().join(format!(
+        "tumu-mouse-noask-{}-{}.sh",
+        std::process::id(),
+        name
+    ));
+    let body = concat!(
+        "#!/bin/sh\n",
+        "printf 'MOUSE-ASKED\\n'\n",
+        "IFS= read -r line\n",
+        "printf '%s\\n' \"$line\" | od -An -c\n",
+        "exec sleep 30\n",
+    );
+    fs::write(&path, body).expect("failed to write the test script");
+    let mut perms = fs::metadata(&path).expect("stat the script").permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+    fs::set_permissions(&path, perms).expect("chmod the script");
+    path
 }
 
 #[test]

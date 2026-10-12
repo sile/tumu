@@ -9,8 +9,17 @@
 //! Keys reach the core as [`Event::Key`](tumu::Event::Key): a key the prefix
 //! latch does not claim is forwarded to the focused sheet's session, and a
 //! latched key runs a command. Mouse reports reach it as
-//! [`Event::Mouse`](tumu::Event::Mouse), which is how a click moves focus. Paste
-//! and undecodable input are drained but not yet acted on.
+//! [`Event::Mouse`](tumu::Event::Mouse), which is how a click moves focus -- and
+//! moving focus is *all* the mouse does, in tumu and in the core: a click runs no
+//! command, and nothing about one is remembered. Paste and undecodable input are
+//! drained but not yet acted on.
+//!
+//! The mouse also follows the focus in a second sense: a child that asks for the
+//! mouse with a DECSET mode is asking for reports tumu is presently consuming
+//! itself. The ask is read back from the session once per drain and after every
+//! event ([`settle_focus`](App::settle_focus)) and kept on the state as
+//! [`Event::MouseWanted`](tumu::Event::MouseWanted), so the state says which of
+//! the two the focused sheet is in. Reporting is not handed over yet.
 //!
 //! The edge also owns the clipboard. A child's OSC 52 copy arrives as
 //! [`termnix::Event::RequestReceived`] with a `SetClipboard`; the edge forwards
@@ -159,6 +168,54 @@ fn termnix_key(key: tuinix::KeyInput) -> termnix::KeyEvent {
     };
 
     termnix::KeyEvent { code, modifiers }
+}
+
+/// Converts a decoded `tuinix` mouse kind into the `termnix` event for it.
+///
+/// `held` is the button tumu believes is down, which a drag has to be told:
+/// the host's [`tuinix::MouseInputKind::Drag`] does not name it. `None` there
+/// means the move cannot be a drag -- no press was forwarded -- so it is sent as
+/// a bare move. The wheel is spelled in the child as a *press* of a wheel button,
+/// because that is what the mouse protocols carry it as and what the child's
+/// parser expects; a release for it is never sent, which is why the core does not
+/// track one.
+///
+/// Returns `None` for a kind the child can have no report for. Nothing in
+/// `tuinix`'s enumeration is like that today -- every kind maps -- but the
+/// signature says so rather than pretending otherwise, so a kind added later is
+/// a compile error here instead of a silently dropped report.
+fn termnix_mouse_kind(
+    kind: tuinix::MouseInputKind,
+    held: Option<tuinix::MouseInputKind>,
+) -> Option<termnix::MouseEventKind> {
+    use termnix::{MouseButton, MouseEventKind};
+    Some(match kind {
+        tuinix::MouseInputKind::LeftPress => MouseEventKind::Press(MouseButton::Left),
+        tuinix::MouseInputKind::LeftRelease => MouseEventKind::Release(MouseButton::Left),
+        tuinix::MouseInputKind::MiddlePress => MouseEventKind::Press(MouseButton::Middle),
+        tuinix::MouseInputKind::MiddleRelease => MouseEventKind::Release(MouseButton::Middle),
+        tuinix::MouseInputKind::RightPress => MouseEventKind::Press(MouseButton::Right),
+        tuinix::MouseInputKind::RightRelease => MouseEventKind::Release(MouseButton::Right),
+        tuinix::MouseInputKind::ScrollUp => MouseEventKind::Press(MouseButton::WheelUp),
+        tuinix::MouseInputKind::ScrollDown => MouseEventKind::Press(MouseButton::WheelDown),
+        tuinix::MouseInputKind::Drag => MouseEventKind::Motion {
+            button: held.and_then(held_mouse_button),
+        },
+    })
+}
+
+/// Returns the button a held press names, for a drag to carry.
+///
+/// Only the three real buttons can be held; the wheel cannot (it has no release),
+/// and a drag is not a button at all. Anything else answers `None`, which sends
+/// the move as a bare move.
+fn held_mouse_button(kind: tuinix::MouseInputKind) -> Option<termnix::MouseButton> {
+    Some(match kind {
+        tuinix::MouseInputKind::LeftPress => termnix::MouseButton::Left,
+        tuinix::MouseInputKind::MiddlePress => termnix::MouseButton::Middle,
+        tuinix::MouseInputKind::RightPress => termnix::MouseButton::Right,
+        _ => return None,
+    })
 }
 
 /// Owns the terminal edge and drives the core until every session is gone.
@@ -396,6 +453,13 @@ impl App {
                 self.dirty = true;
             }
         }
+        // A child can start or stop asking for the mouse at any moment -- a
+        // sheet runs a pager, the pager exits -- and the mode change arrives as
+        // ordinary screen output, not as an event of its own. The ask is read
+        // back from the session once per drain, the same way the title is: the
+        // state holds the last answer and the compare is what makes this cheap
+        // when nothing moved.
+        self.settle_focus();
         self.reap_sessions()
     }
 
@@ -633,8 +697,53 @@ impl App {
     /// the model -- a session's scrollback, its grid -- is read by the edge,
     /// which is the side that holds the sessions. So there is no second
     /// argument to thread through, and no borrow of the app to split.
+    ///
+    /// The focus the event may have moved is settled here, once, rather than at
+    /// every caller: a key, a click, a sheet closing and a child exiting all move
+    /// the focus, and all of them go through this one door.
     fn update_state(&mut self, event: tumu::Event) -> Vec<tumu::Action> {
-        self.state.update(event)
+        let actions = self.state.update(event);
+        self.settle_focus();
+        actions
+    }
+
+    /// Tells the core what the focus now means for the session it is on.
+    ///
+    /// One thing follows the focus and is not in the model: whether the focused
+    /// sheet's child wants the mouse. The core cannot read a session, so the edge
+    /// compares what the session actually asks for against what the state already
+    /// says and reports a change as [`Event::MouseWanted`](tumu::Event::MouseWanted).
+    ///
+    /// A child's ask is read from `termnix`'s modes, so nothing has to be
+    /// tracked by hand: a sheet runs `less`, the modes change, and the next pass
+    /// carries it. `termnix` keeps the mode itself and sends no event for it, so
+    /// the pass runs after every drain as well as after every event -- a pager
+    /// starting is screen output, not an event of its own.
+    ///
+    /// Reporting itself stays tumu's for now, so what this changes is what the
+    /// state *records*; the handover that would act on it is the next step.
+    fn settle_focus(&mut self) {
+        let wanted = self.focused_session_wants_mouse();
+        if wanted != self.state.mouse_wanted() {
+            self.state.update(tumu::Event::MouseWanted(wanted));
+        }
+    }
+
+    /// Returns whether the focused sheet's child is asking for the mouse.
+    ///
+    /// The ask is the session's own mouse-reporting mode, which `termnix` keeps
+    /// as the child set it. A focused sheet with no session -- one whose child has
+    /// not started or has gone -- has nothing to ask, so it answers `false`.
+    fn focused_session_wants_mouse(&self) -> bool {
+        let Some(index) = self.state.focused_index() else {
+            return false;
+        };
+        let Some(id) = self.session_at(index) else {
+            return false;
+        };
+        self.sessions
+            .get(&id)
+            .is_some_and(|session| session.terminal_state().modes().mouse.is_active())
     }
 
     /// Carries out a batch of core actions.
@@ -652,6 +761,9 @@ impl App {
                 }
                 tumu::Action::CloseSession { session } => self.close_session(session),
                 tumu::Action::SendToFocused { index, key } => self.send_to_focused(index, key),
+                tumu::Action::SendMouseToFocused { index, mouse, held } => {
+                    self.send_mouse_to_focused(index, mouse, held)
+                }
                 tumu::Action::OpenEditor { index, session } => self.open_editor(index, session),
                 tumu::Action::PasteClipboard { index } => self.paste_clipboard(index),
                 tumu::Action::PrefixPending => {}
@@ -771,6 +883,65 @@ impl App {
         // batch were already pulled out of the input buffer, so there is no
         // later read whose readiness would flush them; without this the child
         // would sit on the byte until something else woke the loop.
+        let _ = session.pump_io(termnix::PumpBudget::default());
+    }
+
+    /// Hands a mouse report on to the session of the sheet at `index`.
+    ///
+    /// The core decided the report is the focused sheet's child's; this is where
+    /// the coordinates are moved into that child's own grid. The two facts the
+    /// move needs are the sheet's region and the size the session's grid actually
+    /// is: the region says where the sheet sits on the screen and where inside it
+    /// the content starts, and the grid -- read from the session, not derived
+    /// again -- says how far the child's coordinates go. Reading the grid from
+    /// the session is what keeps the clamp honest when the spawn was skipped for
+    /// a region too small to host one.
+    ///
+    /// The report is re-encoded by `termnix` from the child's own modes, exactly
+    /// as a key is: the child may have asked for SGR or for the older byte form,
+    /// and only the session knows which. The bytes are pushed out immediately for
+    /// the same reason a forwarded key's are: the report was already pulled out
+    /// of the input buffer, so no later read's readiness would flush it.
+    fn send_mouse_to_focused(
+        &mut self,
+        index: usize,
+        mouse: tuinix::MouseInput,
+        held: Option<tuinix::MouseInputKind>,
+    ) {
+        let Some(id) = self.session_at(index) else {
+            return;
+        };
+        let Some(region) = self.state.region_of(index) else {
+            return;
+        };
+        let orientation = self.state.orientation();
+        let origin = tumu::sheet_content_origin(orientation);
+        let Some(session) = self.sessions.get_mut(&id) else {
+            return;
+        };
+        let grid = session.terminal_state().size();
+        let position = tumu::screen_position_to_grid(mouse.position, region, origin, grid);
+        let Some(kind) = termnix_mouse_kind(mouse.kind, held) else {
+            return;
+        };
+        let mut modifiers = termnix::Modifiers::new();
+        if mouse.ctrl {
+            modifiers = modifiers.ctrl();
+        }
+        if mouse.alt {
+            modifiers = modifiers.alt();
+        }
+        if mouse.shift {
+            modifiers = modifiers.shift();
+        }
+        let event = termnix::MouseEvent {
+            kind,
+            position,
+            modifiers,
+        };
+        if session.enqueue_input(termnix::Input::Mouse(event)).is_ok() {
+            self.dirty = true;
+        }
         let _ = session.pump_io(termnix::PumpBudget::default());
     }
 

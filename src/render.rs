@@ -378,20 +378,16 @@ pub fn sheet_frame(
     frame
 }
 
-/// Paints the prefix menu into a fresh frame the size of the screen.
+/// Paints the prefix menu into a fresh frame the size of the box.
 ///
 /// The box is drawn where [`MenuLayout`](crate::MenuLayout) says: a top border, a
 /// header row naming the two columns, one row per binding, the send-prefix row,
-/// and a bottom border. Each row is the box's interior width, so a click
-/// anywhere across a row selects it, matching what
-/// [`MenuLayout::command_at`](crate::MenuLayout::command_at) tests.
+/// and a bottom border. Each row is painted across the box's interior width, so
+/// what is on screen is where the layout said it would be.
 ///
-/// The frame is the size of the screen so the renderer can compose it over the
-/// sheet frames with [`Frame::put_frame`](tuinix::Frame::put_frame) at the
-/// origin; only the box's rectangle is written, so the rest is blank and, being
-/// blank, leaves the sheets under it alone when composed.
-///
-/// [`MenuLayout`]: crate::MenuLayout
+/// The frame is the size of the box, so the renderer can compose it over the
+/// sheet frames with [`Frame::put_frame`](tuinix::Frame::put_frame) at the box's
+/// position; the rest of the screen is not part of this frame at all.
 pub fn menu_frame(layout: &crate::MenuLayout) -> tuinix::Frame {
     let mut frame = tuinix::Frame::new(layout.region.size);
     let width = layout.region.size.cols;

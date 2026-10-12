@@ -65,65 +65,6 @@ fn the_box_is_centred_and_holds_every_row() {
 }
 
 #[test]
-fn a_click_selects_the_command_of_the_row_it_lands_on() {
-    let layout = tumu::menu_layout(size(40, 80), PREFIX).expect("the menu fits 40x80");
-
-    for row in &layout.rows {
-        // A click anywhere across the row selects it, not just on its text.
-        let start = row.region.position;
-        let end = tuinix::Position {
-            row: start.row,
-            col: start.col + row.region.size.cols - 1,
-        };
-        assert_eq!(layout.command_at(start), row.command);
-        assert_eq!(layout.command_at(end), row.command);
-    }
-}
-
-#[test]
-fn a_click_on_the_border_or_outside_dismisses() {
-    let layout = tumu::menu_layout(size(40, 80), PREFIX).expect("the menu fits 40x80");
-
-    // The four corners of the box, on the border, select nothing.
-    let top = layout.region.position.row;
-    let left = layout.region.position.col;
-    let bottom = top + layout.region.size.rows - 1;
-    let right = left + layout.region.size.cols - 1;
-    for position in [
-        tuinix::Position {
-            row: top,
-            col: left,
-        },
-        tuinix::Position {
-            row: top,
-            col: right,
-        },
-        tuinix::Position {
-            row: bottom,
-            col: left,
-        },
-        tuinix::Position {
-            row: bottom,
-            col: right,
-        },
-    ] {
-        assert_eq!(
-            layout.command_at(position),
-            None,
-            "{position:?} is on the border"
-        );
-    }
-
-    // A position outside the box entirely.
-    let outside = tuinix::Position {
-        row: layout.region.position.row.saturating_sub(1),
-        col: layout.region.position.col,
-    };
-    assert_eq!(layout.command_at(outside), None);
-    assert!(!layout.contains(outside));
-}
-
-#[test]
 fn the_menu_is_not_laid_out_when_the_screen_is_too_small() {
     // Narrower than the box, and shorter than the box.
     assert!(tumu::menu_layout(size(40, 4), PREFIX).is_none());

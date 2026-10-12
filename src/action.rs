@@ -112,6 +112,37 @@ pub enum Action {
         index: usize,
     },
 
+    /// Hand a mouse report on to the session of the sheet at `index`.
+    ///
+    /// This is the other half of the mouse: the report is *not* a gesture of
+    /// tumu's own, it is the focused sheet's child asking for the mouse, so it
+    /// belongs to that child. The core resolved the focus and decided the report
+    /// is the child's to receive; the edge re-encodes it for the child.
+    ///
+    /// The sheet is named by index, and the *position is still the screen's*,
+    /// not the sheet's: turning a screen position into a position inside the
+    /// child's grid needs the sheet's region and the grid's own size, which is
+    /// the edge's arithmetic -- `tumu::mouse_for_sheet` does it -- so the core
+    /// does not have to repeat the content-region derivation the renderer and
+    /// the spawn already do. The core answers "who" and the edge answers
+    /// "where", exactly as for a key.
+    SendMouseToFocused {
+        /// The sheet whose session should receive the report.
+        index: usize,
+
+        /// The report as the host terminal sent it, in screen coordinates.
+        mouse: tuinix::MouseInput,
+
+        /// The button the core believes is down, for `Drag`.
+        ///
+        /// A drag report from the host does not name the button being held, but
+        /// the child has to be told which one it is; the core tracks the presses
+        /// and releases it has forwarded and passes in what it believes. `None`
+        /// is a drag whose press it never saw -- the report is sent as a bare
+        /// move, since the core cannot invent a button.
+        held: Option<tuinix::MouseInputKind>,
+    },
+
     /// The prefix latch is now armed and waiting for the next key.
     ///
     /// Nothing has to be done with it yet; it is reported so the edge can show

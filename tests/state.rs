@@ -832,79 +832,212 @@ fn the_prefix_again_sends_the_prefix_and_closes_the_menu() {
 }
 
 #[test]
-fn clicking_a_menu_row_runs_its_command_and_closes_the_menu() {
+fn clicking_a_menu_row_does_not_run_it() {
+    // The menu is chosen with keys, so a click anywhere -- a command row
+    // included -- only moves the focus, and the menu stays for the next key.
+    // The click lands on the sheet under the box, which is the point: the box is
+    // not a target, it is a list.
     let mut state = state_with(40, 80, 2);
-    // The focused sheet needs a session for closing it to name one.
-    state.stack.attach_session(0, session(1));
+    let top = state.stack.sheets()[0].0;
     state.update(tumu::Event::Key(prefix()));
-    let layout = state.menu_layout().expect("the menu fits 40x80");
+    assert!(state.menu);
 
-    // Click the row that closes a sheet.
-    let row = layout
+    // A row of the box, which is centred over both sheets.
+    let row = state
+        .menu_layout()
+        .expect("the menu fits 40x80")
         .rows
-        .iter()
-        .find(|row| row.command == Some(tumu::Command::CloseSheet))
-        .expect("a close-sheet row");
-    let actions = state.update(tumu::Event::Mouse(click(
-        row.region.position.row,
-        row.region.position.col + 1,
-    )));
+        .first()
+        .expect("a header row")
+        .region
+        .position;
+    state.update(tumu::Event::Mouse(click(row.row, row.col)));
 
-    assert!(!state.menu, "selecting a row closes the menu");
-    assert_eq!(state.stack.len(), 1, "the focused sheet was closed");
-    assert!(
-        actions
-            .iter()
-            .any(|action| matches!(action, tumu::Action::CloseSession { .. })),
-        "closing a sheet asks the edge to close its session"
-    );
-}
-
-#[test]
-fn clicking_the_menu_border_dismisses_it() {
-    let mut state = state_with(40, 80, 2);
-    state.update(tumu::Event::Key(prefix()));
-    let layout = state.menu_layout().expect("the menu fits 40x80");
-    let corner = layout.region.position;
-
-    let actions = state.update(tumu::Event::Mouse(click(corner.row, corner.col)));
-
-    assert!(!state.menu, "a border click dismisses");
-    assert!(actions.is_empty(), "and runs nothing");
+    assert!(state.menu, "a click does not dismiss the menu");
+    assert_eq!(state.focused, Some(top), "and runs no command either");
     assert_eq!(state.stack.len(), 2, "the stack is untouched");
 }
 
 #[test]
-fn clicking_the_focused_sheets_border_label_opens_the_menu() {
+fn a_click_on_the_focused_sheets_border_is_a_no_op() {
+    // The border carries the command label, but the label is not a target: the
+    // menu is the prefix's, so a click on the line only lands on the sheet.
     // A tall terminal stacks vertically, so the focused border is its last row.
     let mut state = state_with(40, 30, 1);
     let region = state.region_of(0).expect("the sheet's region");
+    let focused = state.focused;
 
     state.update(tumu::Event::Mouse(click(
         region.position.row + region.size.rows - 1,
         region.position.col + 2,
     )));
 
-    assert!(state.menu, "a click on the label opens the menu");
+    assert!(!state.menu, "a border click does not open the menu");
+    assert_eq!(state.focused, focused, "and does not move the focus");
 }
 
 #[test]
-fn clicking_the_focused_sheets_border_opens_the_menu_when_horizontal() {
-    // A wide terminal stacks horizontally, so the border is the sheet's own
-    // *last* column -- the edge it shares with nothing, because the neighbour is
-    // the sheet to its left.
+fn the_focused_sheets_child_asking_for_the_mouse_is_recorded() {
     let mut state = state_with(24, 80, 1);
-    let region = state.region_of(0).expect("the sheet's region");
-    let border_col = region.position.col + region.size.cols - 1;
+    assert!(!state.mouse_wanted(), "nothing asked at startup");
 
-    state.update(tumu::Event::Mouse(click(5, border_col)));
-    assert!(state.menu, "a click on the border opens the menu");
+    state.update(tumu::Event::MouseWanted(true));
+    assert!(state.mouse_wanted());
 
-    // A click one column to its left is content, not border.
-    state.update(tumu::Event::Mouse(click(5, border_col - 1)));
-    // The menu was open, so that click dismisses it; the point is that it did
-    // not land on the border and re-open it.
-    assert!(!state.menu);
+    // And back, because a child that stops asking is as much a fact as one that
+    // starts. Nothing about the layout moves either way.
+    let actions = state.update(tumu::Event::MouseWanted(false));
+    assert!(actions.is_empty(), "the ask implies no I/O");
+    assert!(!state.mouse_wanted());
+}
+
+#[test]
+fn a_child_that_asked_for_the_mouse_gets_the_report_instead_of_the_focus() {
+    let mut state = state_with(24, 80, 2);
+    state.update(tumu::Event::MouseWanted(true));
+
+    // The click is in the sheet *below*, which the focus path would have moved
+    // to. With the child asking, it is the child's report instead and the focus
+    // stays where it is: a program tracking the mouse is tracking it inside its
+    // own grid, so a click on the sheet is a click on the program.
+    let actions = state.update(tumu::Event::Mouse(click(5, 60)));
+
+    assert_eq!(state.focused, Some(state.stack.sheets()[0].0));
+    assert!(
+        matches!(
+            actions.as_slice(),
+            [tumu::Action::SendMouseToFocused {
+                index: 0,
+                held: None,
+                ..
+            }]
+        ),
+        "the report goes to the focused sheet: {actions:?}"
+    );
+}
+
+#[test]
+fn a_forwarded_drag_names_the_button_that_was_pressed() {
+    let mut state = state_with(24, 80, 1);
+    state.update(tumu::Event::MouseWanted(true));
+
+    // Press, then drag: the drag carries the button the press armed, because the
+    // host's drag report does not name it and the child has to be told.
+    state.update(tumu::Event::Mouse(click(5, 10)));
+    let actions = state.update(tumu::Event::Mouse(mouse(
+        tuinix::MouseInputKind::Drag,
+        5,
+        12,
+    )));
+
+    assert!(
+        matches!(
+            actions.as_slice(),
+            [tumu::Action::SendMouseToFocused {
+                held: Some(tuinix::MouseInputKind::LeftPress),
+                ..
+            }]
+        ),
+        "the drag carries the held button: {actions:?}"
+    );
+
+    // The release clears it, so a later drag is a bare move.
+    state.update(tumu::Event::Mouse(mouse(
+        tuinix::MouseInputKind::LeftRelease,
+        5,
+        12,
+    )));
+    let actions = state.update(tumu::Event::Mouse(mouse(
+        tuinix::MouseInputKind::Drag,
+        5,
+        13,
+    )));
+    assert!(
+        matches!(
+            actions.as_slice(),
+            [tumu::Action::SendMouseToFocused { held: None, .. }]
+        ),
+        "a drag after a release has no button: {actions:?}"
+    );
+}
+
+#[test]
+fn a_child_that_stops_asking_leaves_its_held_button_behind() {
+    let mut state = state_with(24, 80, 1);
+    state.update(tumu::Event::MouseWanted(true));
+    state.update(tumu::Event::Mouse(click(5, 10)));
+    // The child stops asking before releasing. The press was already forwarded,
+    // so the button it armed would otherwise be carried by a drag the next time
+    // the child asks -- a button that child never saw pressed.
+    state.update(tumu::Event::MouseWanted(false));
+    state.update(tumu::Event::MouseWanted(true));
+
+    let actions = state.update(tumu::Event::Mouse(mouse(
+        tuinix::MouseInputKind::Drag,
+        5,
+        12,
+    )));
+
+    assert!(
+        matches!(
+            actions.as_slice(),
+            [tumu::Action::SendMouseToFocused { held: None, .. }]
+        ),
+        "the stale button is forgotten: {actions:?}"
+    );
+}
+
+#[test]
+fn the_wheel_is_forwarded_but_never_held() {
+    let mut state = state_with(24, 80, 1);
+    state.update(tumu::Event::MouseWanted(true));
+
+    state.update(tumu::Event::Mouse(mouse(
+        tuinix::MouseInputKind::ScrollUp,
+        5,
+        10,
+    )));
+    let actions = state.update(tumu::Event::Mouse(mouse(
+        tuinix::MouseInputKind::Drag,
+        5,
+        11,
+    )));
+
+    // The wheel has no release, so it can never be the button a drag holds.
+    assert!(
+        matches!(
+            actions.as_slice(),
+            [tumu::Action::SendMouseToFocused { held: None, .. }]
+        ),
+        "the wheel is not a held button: {actions:?}"
+    );
+}
+
+#[test]
+fn with_no_child_asking_a_report_still_only_moves_the_focus() {
+    // The default, restated as the pair of the first test: with nothing asking,
+    // every report takes the focus path and none is forwarded.
+    let mut state = state_with(24, 80, 2);
+    assert!(!state.mouse_wanted());
+
+    let actions = state.update(tumu::Event::Mouse(click(5, 60)));
+
+    assert!(actions.is_empty(), "nothing is forwarded: {actions:?}");
+    assert_eq!(state.focused, Some(state.stack.sheets()[1].0));
+}
+
+#[test]
+fn a_forwarded_report_needs_a_focused_sheet() {
+    let mut state = state_with(24, 80, 1);
+    state.update(tumu::Event::MouseWanted(true));
+    // The child exits and the sheet goes, but the ask is still recorded -- the
+    // edge only clears it on the next pass.
+    let id = state.stack.sheets()[0].0;
+    state.update(tumu::Event::SessionExited(id));
+
+    let actions = state.update(tumu::Event::Mouse(click(5, 10)));
+
+    assert!(actions.is_empty(), "nowhere to forward to: {actions:?}");
 }
 
 #[test]

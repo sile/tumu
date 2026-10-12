@@ -13,7 +13,8 @@ tumu
   - No sessions, panes, pop-up windows
   - Detect device orientation changes (via terminal size change event)
   - No server (a standalone process)
-  - Mouse: click a sheet to focus it
+  - Mouse: click a sheet to focus it; a sheet's program gets the mouse when it
+  asks for it
   - tmux like copy-mode (PoC)
   - Bounded scrollback, set by `--scrollback` or `$TUMU_SCROLLBACK`
   - Prefix key character, set by `--prefix` or `$TUMU_PREFIX`
@@ -222,8 +223,8 @@ rewrite, and it is deferred for now.
 Menu
 ----
 
-When the prefix (default to C-q) is pressed, or the `[C-q ...]` label is
-clicked, an overlay menu window is shown on the center of the terminal:
+When the prefix (default to C-q) is pressed, an overlay menu window is shown on
+the center of the terminal:
 
 ```
    ┌────────────────┐
@@ -237,30 +238,46 @@ clicked, an overlay menu window is shown on the center of the terminal:
 
 The menu lists every prefix chord. Its rows come from the same table the keys
 are resolved from, so a chord cannot be bound without appearing in the menu, or
-listed without being bound. A command is run by pressing its key or by clicking
-anywhere on its row. If an unbound key is pressed, or a region other than a
-command row is clicked, the menu is closed and nothing else happens.
+listed without being bound. A command is run by pressing its key. If an unbound
+key is pressed, the menu is closed and nothing else happens.
+
+The menu is chosen with the keyboard: a click is not a selection, here or
+anywhere else in tumu, so a click on a row is a click on the sheet under the box
+and leaves the menu up.
 
 The menu is a view, like full screen: it changes no sheet's region and leaves
 the stack alone. When the terminal is too small for the box, no menu is shown
-at all, so a click never lands on one that was not drawn.
+at all, so nothing can be typed at a menu that was not drawn.
 
 Mouse
 -----
 
-- click a sheet -- focus it
-- click the focused sheet's border line -- open the menu
-- click a menu row -- run that command
+The mouse has one owner at a time, and which one is the focused sheet's child:
 
-A click moves the focus to the sheet it landed on; it changes nothing else. The
-keyboard follows, so `prefix x` and `prefix o` act on the sheet just clicked.
-A click on a border line opens the menu without moving the focus, and a sheet
-hidden behind a full-screen sheet cannot be clicked at all: what is not on
-screen is not there to point at.
+- A sheet whose program has **not** asked for the mouse gets no reports at all.
+  There, a click is tumu's, and the one thing it does is move the focus to the
+  sheet it landed on.
+- A sheet whose program **has** asked (a pager, an editor, `tmux` inside a sheet)
+  gets every report, and no report moves the focus while it does: a program
+  tracking the mouse is tracking it inside its own grid, so a click on the sheet
+  it runs in is a click on *it*, not a request to go elsewhere. The report is
+  clipped into the child's grid, and its coordinates are the child's own, not the
+  screen's.
 
-Only the left button does something so far. Nothing is forwarded to the
-programs running in the sheets -- a click belongs to tumu -- so a fuller mouse
-(giving a sheet its own report when it wants one) is still open.
+The switch is the program's own mode, the one it sets with a DECSET escape
+sequence; tumu only reads it back and follows it. Nothing is configured, and the
+host terminal's mouse reporting never changes -- what changes is what tumu does
+with a report. The switch is read from the *focused* sheet, because the mouse
+follows the focus the way the keyboard does: there is one pointer and one focused
+sheet.
+
+Dragging works: tumu remembers which button it forwarded a press for, so a drag
+names the button the child is holding. A click that only moved the focus leaves
+nothing behind for a later drag to continue.
+
+Only the left button moves the focus, and only a press at that. A click runs no
+command: the [menu](#menu) is opened by the prefix and chosen with a key, so a
+click on a menu row is a click on the sheet under the box.
 
 Known issues
 ------------
@@ -269,4 +286,9 @@ Known issues
   missing, not executable, or does not accept `--tail`) stays in the stack as an
   empty sheet and cannot be closed by typing to it, because it has no child to
   type to. It is closed like any other sheet, with `prefix x`.
+- Only the *focused* sheet's reports are forwarded. A sheet whose child asked for
+  the mouse is the one `prefix n`/`o`/`x` and a click move the focus to, so a
+  background sheet gets nothing while it is not focused -- the same as the
+  keyboard. The mode is not remembered per sheet: leaving and returning re-reads
+  it from the child, which still has it set.
 

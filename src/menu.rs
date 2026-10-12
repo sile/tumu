@@ -10,12 +10,12 @@
 //! The rows come from [`BINDINGS`](crate::BINDINGS), so a chord cannot exist
 //! without appearing in the menu and the menu cannot list a chord that does not
 //! exist. The key column is the chord's own text and the label column is the
-//! binding's label, which is what makes the two the same fact.
-//!
-//! Below the command rows sits the *send-prefix* row, which stands for the
-//! prefix pressed twice rather than a [`Command`]. A click on a command row
-//! selects it; a click anywhere else in the box -- the border, the header, the
-//! send-prefix row -- dismisses the menu.
+//! binding's label, which is what makes the two the same fact.//! Below the command rows sits the *send-prefix* row, which stands for the
+//! prefix pressed twice rather than a [`Command`]. Nothing here is chosen with
+//! the pointer: the menu is a list a key picks from, so the layout answers only
+//! *where* each row is drawn. The rectangles are still here -- the renderer
+//! paints each row's text across its own rectangle, so the drawing and the
+//! layout cannot drift.
 
 use crate::{BINDINGS, Command};
 
@@ -42,9 +42,11 @@ pub const GAP: usize = 3;
 
 /// One line of the menu: the text it shows, and where it sits.
 ///
-/// A row is one line of a box's interior, as wide as the interior, so a click
-/// anywhere across it lands on the row and not on the character under the
-/// pointer. That is what makes a row a target rather than the text in it.
+/// A row is one line of a box's interior, as wide as the interior, which is what
+/// the renderer writes its text across. Nothing tests the rectangle against a
+/// pointer any more, but the two halves still belong together: the line is drawn
+/// where the layout says, so the box cannot be described one way and painted
+/// another.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MenuRow {
     /// The key column's text, left-aligned in its column.
@@ -53,8 +55,11 @@ pub struct MenuRow {
     /// The label column's text, left-aligned after the gap.
     pub label: String,
 
-    /// The command the row selects, or `None` for the header and the
-    /// send-prefix row, which select nothing.
+    /// The command the row stands for, or `None` for the header and the
+    /// send-prefix row, which stand for nothing.
+    ///
+    /// It is not a click target; it is what makes the row's key and its meaning
+    /// one fact, and what `tests/menu.rs` checks the list against.
     pub command: Option<Command>,
 
     /// Where the row sits on the screen: the box's interior width, one row
@@ -64,11 +69,11 @@ pub struct MenuRow {
 
 /// The menu as it is laid out on a screen of a given size.
 ///
-/// The rectangles are in screen coordinates, so a click can be hit-tested
-/// against them without knowing how the box was centred, and the renderer can
-/// paint each row without recomputing the arithmetic. The column widths are
-/// here too, so the renderer pads the two columns to line them up rather than
-/// measuring the text a second time.
+/// The rectangles are in screen coordinates, so the renderer can paint each row
+/// without knowing how the box was centred, and a test can read where a row went
+/// without recomputing the arithmetic. The column widths are here too, so the
+/// renderer pads the two columns to line them up rather than measuring the text
+/// a second time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MenuLayout {
     /// The whole box, border included.
@@ -87,20 +92,12 @@ pub struct MenuLayout {
 }
 
 impl MenuLayout {
-    /// Returns the command the click at `position` selects, or `None` when the
-    /// click is not on a command row.
-    ///
-    /// A click outside the box, on the border, on the header, or on the
-    /// send-prefix row all answer `None`: they are the dismiss cases, and the
-    /// caller treats every `None` the same way.
-    pub fn command_at(&self, position: tuinix::Position) -> Option<Command> {
-        self.rows
-            .iter()
-            .find(|row| row.region.contains(position))
-            .and_then(|row| row.command)
-    }
-
     /// Returns whether `position` is anywhere inside the box.
+    ///
+    /// It is the one geometric question left to ask about the menu: nothing is
+    /// *chosen* with the pointer, so the rows need no hit test. A caller that
+    /// wants to know whether a click landed on the box at all -- a test, or a
+    /// future gesture -- asks this.
     pub fn contains(&self, position: tuinix::Position) -> bool {
         self.region.contains(position)
     }

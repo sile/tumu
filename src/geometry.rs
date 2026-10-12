@@ -117,3 +117,39 @@ pub fn region_extent(region: tuinix::Region, axis: crate::Orientation) -> usize 
         crate::Orientation::Horizontal => region.size.cols,
     }
 }
+
+/// Moves a screen position into the grid of the sheet occupying `region`.
+///
+/// This is the arithmetic a forwarded mouse report needs: the host says where the
+/// pointer is on *the screen*, and the child knows only its own grid, which
+/// starts at the sheet's content origin and is one line shorter than the sheet
+/// when the stack runs vertically or one column narrower when it runs
+/// horizontally (see [`sheet_content_size`](crate::sheet_content_size)).
+///
+/// `grid` is the child's own size -- what the session was spawned or resized to
+/// -- and is the authority on where the grid ends: a report outside it would be a
+/// position the child cannot have, so it is clamped into the grid rather than
+/// dropped. Clamping is the honest answer for the same reason it is for a click:
+/// the mouse protocols have no way to say "outside", and a drag that leaves the
+/// sheet and comes back should keep working, which is exactly what a clamped
+/// trail of reports does.
+///
+/// The result is in the child's coordinates, so the edge can hand it straight to
+/// `termnix` to re-encode for that child.
+pub fn screen_position_to_grid(
+    position: tuinix::Position,
+    region: tuinix::Region,
+    origin: tuinix::Position,
+    grid: termnix::Size,
+) -> termnix::Position {
+    let row = position
+        .row
+        .saturating_sub(region.position.row + origin.row);
+    let col = position
+        .col
+        .saturating_sub(region.position.col + origin.col);
+    termnix::Position {
+        row: row.min(usize::from(grid.rows.get()) - 1) as u16,
+        col: col.min(usize::from(grid.cols.get()) - 1) as u16,
+    }
+}

@@ -63,6 +63,30 @@ pub struct State {
     /// out.
     pub menu: bool,
 
+    /// Whether the focused sheet's child is asking for the mouse.
+    ///
+    /// It is *the focused sheet's* ask, not a per-session fact, because the mouse
+    /// follows the focus the way the keyboard does: one pointer, one focused
+    /// sheet, so one bit decides where a report goes. The edge recomputes it when
+    /// the focus changes and reports the change as
+    /// [`Event::MouseWanted`](crate::Event::MouseWanted).
+    ///
+    /// While it is set, a mouse report is the child's and is forwarded to it;
+    /// while it is clear, a report is tumu's own and only moves the focus. That
+    /// is the whole of the handover: the host terminal's reporting never changes,
+    /// because the one thing on the other side of it -- the focused sheet's child
+    /// -- changes what it does with a report instead.
+    pub mouse_wanted: bool,
+
+    /// The mouse button the core believes is held down, if any.
+    ///
+    /// A drag report from the host does not name the button being held, but the
+    /// child has to be told which one it is, so it is tracked here from the
+    /// presses and releases that were forwarded. It only ever counts buttons
+    /// tumu sent: a press that arrived while the child was not asking for the
+    /// mouse was tumu's, so no drag can be a continuation of it.
+    pub held_button: Option<tuinix::MouseInputKind>,
+
     /// Whether the focused sheet is shown full screen.
     ///
     /// Full screen is a *view*, not a rearrangement. It is a single flag rather
@@ -96,6 +120,8 @@ impl State {
             prefix: false,
             prefix_char: crate::input::DEFAULT_PREFIX_CHAR,
             menu: false,
+            mouse_wanted: false,
+            held_button: None,
             full_screen: false,
             focused: None,
             exit: false,
@@ -163,6 +189,7 @@ impl State {
         match event {
             Event::Key(key) => self.handle_key(key),
             Event::Mouse(mouse) => self.handle_mouse(mouse),
+            Event::MouseWanted(wanted) => self.handle_mouse_wanted(wanted),
             Event::Resize(size) => self.handle_resize(size),
             Event::TitleChanged { index, title } => self.handle_title_changed(index, title),
             Event::SessionExited(id) => self.handle_session_exited(id),
@@ -183,52 +210,45 @@ impl State {
         Vec::new()
     }
 
-    /// Moves focus to the sheet under the pointer.
+    /// Routes a mouse report: to the focused sheet's child, or to the focus.
     ///
-    /// This is the first gesture mouse support answers, and the only one so far:
-    /// a left press picks the sheet it landed on. The test is done against
+    /// Which one it is is [`mouse_wanted`](State::mouse_wanted): a child that
+    /// asked for the mouse with a DECSET mode gets every report, and no report
+    /// moves the focus while it does -- a program that tracks the mouse is
+    /// tracking it inside its own grid, and a click on the sheet it runs in is a
+    /// click on *it*, not a request to focus something else. A child that has not
+    /// asked gets nothing; there, the one gesture tumu answers is a left press,
+    /// which moves the focus to the sheet it landed on.
+    ///
+    /// The report is forwarded to the *focused* sheet whatever it landed on.
+    /// That is the same rule the keyboard follows, and it is the only rule that
+    /// makes sense for a child: the pointer it sees is its own, and a sheet that
+    /// is not focused has no child waiting to hear about one. A click outside the
+    /// focused sheet's region is the child's to make sense of -- a terminal mouse
+    /// protocol has no coordinates outside the grid, so the edge clips it into
+    /// the grid rather than dropping it.
+    ///
+    /// The held button is tracked here rather than at the edge because it is
+    /// state: a drag report does not name its button, so the child can only be
+    /// told which one it is if someone remembers the press. Only presses that
+    /// were *forwarded* count, so a click that moved the focus leaves nothing
+    /// behind for a later drag to be a continuation of.
+    ///
+    /// The hit test for the focus path is done against
     /// [`regions()`](State::regions) rather than the stack's own layout for one
     /// reason -- that is the method where full screen enters the layout. A sheet
-    /// hidden behind a full-screen sheet has an empty region there, so a click
-    /// on the space it would have had lands on nothing instead of stealing focus
-    /// out from under the view. Reusing `Stack::hit_test` would test the
-    /// unfolded layout and do exactly that.
-    ///
-    /// Every other kind -- a release, a drag, a wheel turn -- is dropped. None
-    /// of them has a meaning yet, and a child never sees a mouse report while
-    /// the edge keeps reporting on for itself, so there is nothing to forward.
+    /// hidden behind a full-screen sheet has an empty region there, so a click on
+    /// the space it would have had lands on nothing instead of stealing focus out
+    /// from under the view. Reusing `Stack::hit_test` would test the unfolded
+    /// layout and do exactly that.
     fn handle_mouse(&mut self, mouse: tuinix::MouseInput) -> Vec<Action> {
+        if self.mouse_wanted {
+            return self.forward_mouse(mouse);
+        }
         if mouse.kind != tuinix::MouseInputKind::LeftPress {
             return Vec::new();
         }
-        let position = mouse.position;
-
-        // The menu, when it is up, gets first refusal: a click on a command row
-        // runs it, and a click anywhere else in the box dismisses the menu. This
-        // is tested before anything else so a menu drawn over a sheet does not
-        // let a click fall through to the sheet under it.
-        if self.menu {
-            let layout = self.menu_layout();
-            let command = layout
-                .as_ref()
-                .and_then(|layout| layout.command_at(position));
-            self.menu = false;
-            return match command {
-                Some(command) => self.handle_command(command),
-                None => Vec::new(),
-            };
-        }
-
-        // The command label opens the menu. Only the focused sheet draws one, so
-        // only its border line can be clicked, and the click does not move the
-        // focus: the menu is about the focused sheet, and a click on the label
-        // must not quietly change which sheet that is.
-        if self.label_at(position) {
-            self.menu = true;
-            return Vec::new();
-        }
-
-        if let Some(index) = self.sheet_at(position)
+        if let Some(index) = self.sheet_at(mouse.position)
             && let Some((id, _)) = self.stack.sheets().get(index)
         {
             self.focused = Some(*id);
@@ -238,43 +258,68 @@ impl State {
         Vec::new()
     }
 
-    /// Returns whether `position` is on the focused sheet's command label.
+    /// Sends a mouse report to the focused sheet's child and tracks the button.
     ///
-    /// The label is the border line of the focused sheet: the last row of a
-    /// vertical sheet, the last column of a horizontal one. Only the label's
-    /// own part of the line is meant, but a click anywhere along the line
-    /// accepts -- the border *is* the affordance, and separating the label's
-    /// few cells from the rule's many would make the target smaller than the
-    /// thing drawn.
+    /// The button is what makes this more than a pass-through: a press arms it, a
+    /// release clears it, and a drag carries whatever is armed so the child can
+    /// tell a drag from a bare move. The wheel is not tracked -- it has no
+    /// release, so it can never be held -- which is why only the press and
+    /// release kinds touch the field.
     ///
-    /// A hidden sheet (full screen elsewhere) has an empty region, and a stack
-    /// with no focus has no label, so neither can be clicked.
-    fn label_at(&self, position: tuinix::Position) -> bool {
-        let orientation = self.orientation();
-        self.regions()
-            .iter()
-            .zip(self.stack.sheets())
-            .enumerate()
-            .any(|(index, (region, _))| {
-                if Some(index) != self.focused_index() {
-                    return false;
-                }
-                if region.size.rows == 0 || region.size.cols == 0 {
-                    return false;
-                }
-                match orientation {
-                    crate::Orientation::Vertical => {
-                        position.row == region.position.row + region.size.rows - 1
-                            && position.col >= region.position.col
-                            && position.col < region.position.col + region.size.cols
-                    }
-                    crate::Orientation::Horizontal => {
-                        position.col == region.position.col + region.size.cols - 1
-                            && position.row >= region.position.row
-                            && position.row < region.position.row + region.size.rows
-                    }
-                }
-            })
+    /// A report with no focused sheet has nowhere to go, and is dropped: the
+    /// ask that put us in this path can only have come from a focused session,
+    /// but the stack can empty between the two -- a child can exit and be reaped
+    /// before its own report is read back.
+    fn forward_mouse(&mut self, mouse: tuinix::MouseInput) -> Vec<Action> {
+        let Some(index) = self.focused_index() else {
+            self.held_button = None;
+            return Vec::new();
+        };
+        let held = match mouse.kind {
+            tuinix::MouseInputKind::LeftPress
+            | tuinix::MouseInputKind::MiddlePress
+            | tuinix::MouseInputKind::RightPress => {
+                self.held_button = Some(mouse.kind);
+                None
+            }
+            tuinix::MouseInputKind::LeftRelease
+            | tuinix::MouseInputKind::MiddleRelease
+            | tuinix::MouseInputKind::RightRelease => {
+                self.held_button = None;
+                None
+            }
+            tuinix::MouseInputKind::Drag => self.held_button,
+            tuinix::MouseInputKind::ScrollUp | tuinix::MouseInputKind::ScrollDown => None,
+        };
+        vec![Action::SendMouseToFocused { index, mouse, held }]
+    }
+
+    /// Records what the focused sheet's child wants from the mouse.
+    ///
+    /// Turning the ask *off* also forgets any held button: the press that armed
+    /// it was the child's, and a child that has stopped asking cannot be waiting
+    /// for its release. Forgetting it here is what stops a later drag to the same
+    /// child -- after it asks again -- from claiming a button it never saw.
+    ///
+    /// Nothing about the layout moves, so no action is returned: what the ask
+    /// changes is where a *report* goes, which the next report answers for
+    /// itself.
+    fn handle_mouse_wanted(&mut self, wanted: bool) -> Vec<Action> {
+        self.mouse_wanted = wanted;
+        if !wanted {
+            self.held_button = None;
+        }
+        Vec::new()
+    }
+
+    /// Returns whether the focused sheet's child is asking for the mouse.
+    ///
+    /// An empty stack has no child to ask, so it answers `false`. This is what
+    /// the edge compares against the session's own ask to decide whether the
+    /// focus has just moved to or away from a sheet that wants the mouse, so a
+    /// sheet that starts a pager records the ask and the edge can act on it.
+    pub fn mouse_wanted(&self) -> bool {
+        self.mouse_wanted
     }
 
     /// Returns the index of the sheet under `position`, or `None` when the

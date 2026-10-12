@@ -38,8 +38,8 @@ pub use action::{Action, Program};
 pub use command::Command;
 pub use event::Event;
 pub use geometry::{
-    cell_size_to_terminal_size, region_extent, split_region, terminal_region,
-    terminal_size_to_cell_size,
+    cell_size_to_terminal_size, region_extent, screen_position_to_grid, split_region,
+    terminal_region, terminal_size_to_cell_size,
 };
 pub use id::{SheetId, TermnixSessionId};
 pub use input::{

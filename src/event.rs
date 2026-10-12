@@ -33,7 +33,30 @@ pub enum Event {
     /// modifiers -- so a later gesture (a scroll, a modifier-click) does not
     /// need another event variant. Only the position and the press kind are read
     /// today; see [`handle_mouse`](crate::State::handle_mouse).
+    ///
+    /// Moving the focus is *all* the core does with a report, and the only thing
+    /// a report can do: a click is not shown in the frame and nothing about it is
+    /// remembered. The menu is chosen by keys, so a click can never run a
+    /// command -- see [`handle_mouse`](crate::State::handle_mouse).
     Mouse(tuinix::MouseInput),
+
+    /// Whether the focused sheet's child is asking to be sent the mouse.
+    ///
+    /// A program that wants the mouse -- a pager, an editor, `tmux` itself --
+    /// turns reporting on with a DECSET mode, and `termnix` records the ask in
+    /// the session's modes. The host terminal, though, is *tumu's* to configure,
+    /// and the mouse can only be reported to one layer: with reporting on at the
+    /// host a report reaches tumu and nowhere else, so a child that asked for it
+    /// would never see one. The edge therefore tracks the focused session's ask
+    /// and tells the core when it changes.
+    ///
+    /// It is *the focused sheet's* ask, not a per-session fact, because the
+    /// mouse follows the focus the way the keyboard does: one pointer, one
+    /// focused sheet, so one bit decides where a report goes. The bit travels
+    /// with the state so that a later change (handing the mouse on to the child)
+    /// needs no new event, and so a test can pin what happens in each case
+    /// without a PTY.
+    MouseWanted(bool),
 
     /// The host terminal changed size.
     ///

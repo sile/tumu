@@ -1,10 +1,10 @@
-//! End-to-end tests for the prefix menu: pressing the prefix shows it, a chord
-//! runs through it, and a click on a row selects it.
+//! End-to-end tests for the prefix menu: pressing the prefix shows it and a
+//! chord runs through it.
 //!
 //! These drive the real binary, so they prove the menu is drawn from the same
-//! bindings the keys are resolved from and that its rows are clickable where
-//! they are drawn. A tall terminal is used so the sheets' borders are rows and
-//! the menu's rows are ordinary rows of text, which `screen_contains` can read.
+//! bindings the keys are resolved from. A tall terminal is used so the sheets'
+//! borders are rows and the menu's rows are ordinary rows of text, which
+//! `screen_contains` can read.
 
 mod e2e;
 
@@ -81,15 +81,17 @@ fn an_unbound_key_closes_the_menu_without_running_anything() {
 }
 
 #[test]
-fn clicking_a_menu_row_runs_its_command() {
+fn clicking_a_menu_row_moves_the_focus_and_leaves_the_menu_up() {
+    // The menu is chosen with keys, so a click is not a selection: it lands on
+    // whatever sheet is under the box and does nothing else. The menu is still
+    // up, which means the click neither ran a command nor dismissed the list.
     let mut tumu = harness("click-row");
     tumu.wait_for_text("└ [C-q ...]");
 
     tumu.send_prefix();
     tumu.wait_until("the menu appears", |h| h.screen_contains("┌"));
 
-    // Find the row that says "quit" and click it. The menu is centred, so the
-    // test reads the row's own position from the screen rather than guessing.
+    // Click the row that says "quit".
     let row = tumu
         .screen_rows()
         .iter()
@@ -97,5 +99,10 @@ fn clicking_a_menu_row_runs_its_command() {
         .expect("a quit row") as u16;
     tumu.click(row, 30);
 
+    // Tumu is still running -- `quit` was not run -- and the menu is still up.
+    // A key still works, which is what proves the latch and the menu survived
+    // the click: the chord closes the menu and runs.
+    tumu.wait_until("the menu is still up", |h| h.screen_contains("┌"));
+    tumu.send_char('q');
     tumu.wait_for_exit();
 }
