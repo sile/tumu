@@ -444,9 +444,7 @@ pub fn menu_frame(layout: &crate::MenuLayout) -> tuinix::Frame {
         line.push(right_corner);
         line
     };
-    let bottom_row = layout.region.size.rows - 1;
     put_line(0, &border('┌', '┐'));
-    put_line(bottom_row, &border('└', '┘'));
 
     // A content row: `| key  label |`, the two columns padded to their fixed
     // widths so the labels line up across rows. The row's screen row is turned
@@ -463,6 +461,11 @@ pub fn menu_frame(layout: &crate::MenuLayout) -> tuinix::Frame {
         );
         put_line(row.region.position.row - layout.region.position.row, &text);
     }
+
+    // The bottom border goes on last: a content row is as wide as the interior,
+    // so it can never reach the border row, but writing the border after them
+    // leaves no ordering in which one row could erase it.
+    put_line(layout.region.size.rows - 1, &border('└', '┘'));
 
     frame
 }

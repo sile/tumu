@@ -185,9 +185,11 @@ fn layout(
     // the text, and the gap between the columns.
     let inner = key_width + GAP + label_width;
     let width = inner + 4;
-    // A header, one row per binding, the trailer if there is one, and the two
-    // border rows.
-    let height = bindings.len() + 2 + usize::from(trailer.is_some());
+    // One header row, one row per binding, the trailer if there is one, and the
+    // two border rows. The 3 is the header plus the two borders, so the box is
+    // as tall as the rows that go in it -- one short and the bottom border would
+    // be pushed off the box (or a content row would land on it).
+    let height = bindings.len() + 3 + usize::from(trailer.is_some());
 
     if width > size.cols || height > size.rows {
         return None;

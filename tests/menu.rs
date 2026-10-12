@@ -33,6 +33,26 @@ fn the_menu_lists_one_row_per_binding_plus_a_header_and_send_prefix() {
 }
 
 #[test]
+fn the_box_is_tall_enough_for_both_borders_and_every_row() {
+    // The box is the header, every binding, the trailer if there is one, and two
+    // border rows. A box one row short hides the bottom border, so the height is
+    // checked against the rows it holds rather than a literal.
+    let prefix = tumu::menu_layout(size(40, 80), PREFIX).expect("the menu fits 40x80");
+    assert_eq!(
+        prefix.region.size.rows,
+        prefix.rows.len() + 2,
+        "one row per listed row, plus the two borders"
+    );
+
+    let ext = tumu::ext_menu_layout(size(40, 80)).expect("the ext menu fits 40x80");
+    assert_eq!(
+        ext.region.size.rows,
+        ext.rows.len() + 2,
+        "the ext menu measures its box the same way"
+    );
+}
+
+#[test]
 fn the_box_is_centred_and_holds_every_row() {
     let size = size(40, 80);
     let layout = tumu::menu_layout(size, PREFIX).expect("the menu fits 40x80");

@@ -396,3 +396,55 @@ fn the_menu_paints_the_rows_the_layout_names() {
         );
     }
 }
+
+#[test]
+fn an_open_menu_is_closed_by_a_border_on_all_four_sides() {
+    // The box is a rectangle: a top border, a bottom border, and a vertical line
+    // down each side. A box that is a row short loses its bottom border while its
+    // top and sides stay, so the bottom is checked as well as the top.
+    for name in ["prefix", "ext"] {
+        let mut state = started(24, 40, VERTICAL);
+        let layout = if name == "prefix" {
+            state.menu = true;
+            state.menu_layout()
+        } else {
+            state.ext_menu = true;
+            state.ext_menu_layout()
+        }
+        .expect("the open menu fits 24x40");
+        let frame = tumu::frame(&state, &no_grids());
+
+        // The box's interior row, as it lands on screen: the box is composed
+        // over the sheets, so a row is sliced to the box's columns before it is
+        // read -- the sheet border underneath is not the menu's.
+        let box_row = |row: usize| -> String {
+            let col = layout.region.position.col;
+            (col..col + layout.region.size.cols)
+                .map(|col| {
+                    frame
+                        .chars()
+                        .find(|(p, _)| p.row == row && p.col == col)
+                        .map(|(_, ch)| ch.value())
+                        .unwrap_or(' ')
+                })
+                .collect()
+        };
+
+        let top = box_row(layout.region.position.row);
+        assert!(top.starts_with('┌'), "{name}: a top border: {top:?}");
+        assert!(top.ends_with('┐'), "{name}: the top border closes: {top:?}");
+
+        // The box's last row is the bottom border; it is the row the box ends
+        // on, so a content row never reaches past it.
+        let last = layout.region.position.row + layout.region.size.rows - 1;
+        let bottom = box_row(last);
+        assert!(
+            bottom.starts_with('└'),
+            "{name}: a bottom border: {bottom:?}"
+        );
+        assert!(
+            bottom.ends_with('┘'),
+            "{name}: the bottom border closes: {bottom:?}"
+        );
+    }
+}
