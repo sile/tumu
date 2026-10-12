@@ -98,6 +98,11 @@ const fn chord(c: char) -> tuinix::KeyInput {
 /// and `n` is *next*, where "next" is the direction the stack advances --
 /// downwards when the sheets run down the screen, rightwards when they run
 /// across it.
+///
+/// The split's share is bound to `+` and `-`, the two keys that grow and shrink
+/// a thing everywhere else: `+` widens the sheets at hand, `-` narrows them.
+/// They are the run-time half of the `--ratio` setting and read left to right
+/// the way the arithmetic does.
 pub const BINDINGS: &[Binding] = &[
     Binding {
         key: chord('c'),
@@ -123,6 +128,16 @@ pub const BINDINGS: &[Binding] = &[
         key: chord('t'),
         command: Command::MoveSheetToTop,
         label: "move to top",
+    },
+    Binding {
+        key: chord('+'),
+        command: Command::WidenSheet,
+        label: "widen sheet",
+    },
+    Binding {
+        key: chord('-'),
+        command: Command::NarrowSheet,
+        label: "narrow sheet",
     },
     Binding {
         key: chord('r'),

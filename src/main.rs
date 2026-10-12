@@ -58,6 +58,28 @@ fn main() -> noargs::Result<()> {
         .take(&mut args)
         .then(|a| single_char(a.value()))?;
 
+    // The odds the sheets split by, as the `num` of the `num : 1` share the
+    // sheet at hand claims against everything below it. One number is enough
+    // because the other side is fixed at one -- a finer shape is not needed and
+    // would make the run-time steps harder to reason about; the share is moved
+    // from here on by `prefix +` and `prefix -`, which the library bounds. The
+    // flag, the environment, and the built-in default come from this one
+    // declaration, in the same precedence as `--scrollback`. The default is the
+    // library's own constant spelled out as a literal because `noargs` takes a
+    // `&'static str`; it must stay equal to `tumu::DEFAULT_RATIO_NUM`.
+    //
+    // Out-of-range numbers are clamped by `Ratio::from_num`, not rejected: a
+    // `--ratio 99` starts at the widest share tumu offers rather than refusing
+    // to run, which matches the run-time steps never leaving the range either.
+    let ratio_num: u32 = noargs::opt("ratio")
+        .short('r')
+        .ty("N")
+        .env("TUMU_RATIO")
+        .default("1")
+        .doc("Split odds as N:1, the sheet's share against the sheets below (1-5)")
+        .take(&mut args)
+        .then(|a| a.value().parse::<u32>())?;
+
     // Which way the sheets stack. It used to be derived from the terminal's
     // shape, which made a rotation flip the layout by itself; now it is a
     // setting, chosen here once and then by `prefix r` at run time. The flag,
@@ -109,7 +131,8 @@ fn main() -> noargs::Result<()> {
     let editor_dir = editor_dir();
     let state = tumu::State::new(seed)
         .with_prefix_char(prefix_char)
-        .with_orientation(orientation);
+        .with_orientation(orientation)
+        .with_ratio(tumu::Ratio::from_num(ratio_num));
     match app::App::new(state, shell, editor, scrollback, editor_dir) {
         Ok(mut app) => app.run()?,
         Err(err) => {

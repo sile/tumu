@@ -12,6 +12,7 @@ tumu
   - Stacked sheets (see below)
   - No sessions, panes, pop-up windows
   - Stacking axis set by `prefix r` or `--orientation`
+  - Split odds set by `--ratio`, moved at run time with `prefix +` / `prefix -`
   - No server (a standalone process)
   - Mouse: click a sheet to focus it; a sheet's program gets the mouse when it
   asks for it
@@ -55,7 +56,8 @@ $            |[C |   s2    |
 - When new sheet is created, it stacked to the top of the stack.
 - each sheet size is decided automatically
   - e.g., s1:remainings = 1:1, remaining1:remaining-others = 1:1, ....
-  - odds rate can be changes. but the sheet sizes are calculated automatically, so a
+  - the odds are a setting (`--ratio`, or `prefix +` / `prefix -` at run time),
+    but the sheet sizes are calculated from them, so a
     resize (a rotation, most of all) re-lays the stack out rather than moving it
 - a sheet can be swaped to the top, or, move to the stop
 - support full screen mode (like tmux does)
@@ -148,6 +150,35 @@ want different stacks), and rearranging the sheets because the device turned is
 surprising rather than helpful. A resize now re-lays the stack out along the axis
 it already has, and the axis changes only when asked.
 
+Split odds
+----------
+
+Every sheet's size comes from a single proportion: at each step the sheet at
+hand takes `N` parts and every sheet below it together takes `1`. `N` starts at
+`1` (the halving the examples above show) and is set at startup:
+
+- `--ratio N` (or `-r N`)
+- `$TUMU_RATIO`
+
+The flag wins over the environment, the environment over the default (`1`),
+exactly as for `--scrollback`. The value is a single whole number -- the `N` of
+the `N : 1` odds, not a `N:D` pair -- because the other side is fixed at `1`:
+the sheet at hand is measured against everything below it, and a finer shape is
+neither needed nor easier to reason about. A value out of range is clamped into
+`1..=5` rather than rejected, so `--ratio 99` starts at the widest share instead
+of refusing to run.
+
+`prefix +` and `prefix -` move `N` by one part while tumu runs: `+` widens the
+sheets at hand, `-` narrows them. The bounds are the same `1..=5`, so at either
+end the step is a no-op rather than a share that grows without end or a sheet
+squeezed away.
+
+It is a *layout* change, not a view one: every region is derived from the odds,
+so the children are resized to match -- the same shape `prefix r` has. And like
+the axis it is only the *shape* that is recorded, not any rectangle: a resize
+re-derives every region from the odds and the size, so the ratio survives a
+rotation and a terminal change unchanged.
+
 Keys
 ----
 
@@ -174,6 +205,8 @@ and the setting needs no check against the binding table.
 - `prefix p` -- move the focus up (vertical) / left (horizontal)
 - `prefix n` -- move the focus down (vertical) / right (horizontal)
 - `prefix t` -- move the focused sheet to the top of the stack
+- `prefix +` -- widen the sheets at hand (a wider share of the split)
+- `prefix -` -- narrow the sheets at hand
 - `prefix r` -- flip the stacking axis (vertical / horizontal)
 - `prefix z` -- show the focused sheet full screen, and back
 - `prefix l` -- open the focused sheet's scrollback in an editor (see below)
@@ -331,6 +364,9 @@ the center of the terminal:
    │ x    ext menu     │
    | p    ...          |
    | n    ...          |
+   | t    ...          |
+   | +    ...          |
+   | -    ...          |
    | ...               |
    | C-q  send prefix  |
    └───────────────────┘

@@ -184,6 +184,31 @@ impl State {
         self
     }
 
+    /// Sets the odds the sheets split by and returns the state.
+    ///
+    /// Like the prefix character and the axis, it is set once, from what the
+    /// edge read off the command line and the environment -- `--ratio` and
+    /// `$TUMU_RATIO` -- and from then on it is `prefix +` and `prefix -` that
+    /// move it. It goes through [`Stack::set_ratio`](crate::Stack::set_ratio),
+    /// so the split, the border, and every region read the same value back and
+    /// cannot disagree; nothing has to be resized here, because the first layout
+    /// is derived after this from the size the driver reports.
+    pub fn with_ratio(mut self, ratio: crate::Ratio) -> Self {
+        self.stack.set_ratio(ratio);
+        self
+    }
+
+    /// Returns the odds the sheets split by.
+    ///
+    /// The value the split is derived from, read back from the stack so the
+    /// single copy of it is the one the regions use. The renderer does not need
+    /// it -- the regions it paints from already carry the split -- but a test
+    /// (and a future status line) can ask what the share is without deriving it
+    /// from a region.
+    pub fn ratio(&self) -> crate::Ratio {
+        self.stack.ratio()
+    }
+
     /// Returns the axis the stack is laid out along.
     ///
     /// The renderer needs it to know which edge of a sheet carries the border:
@@ -501,6 +526,8 @@ impl State {
             Command::FocusNext => self.handle_focus_step(1),
             Command::FocusPrevious => self.handle_focus_step(-1),
             Command::MoveSheetToTop => self.handle_move_sheet_to_top(),
+            Command::WidenSheet => self.handle_resize_split(1),
+            Command::NarrowSheet => self.handle_resize_split(-1),
             Command::RotateOrientation => self.handle_rotate_orientation(),
             Command::ToggleFullScreen => self.handle_toggle_full_screen(),
             Command::EditScrollback => self.handle_edit_scrollback(),
@@ -627,6 +654,40 @@ impl State {
             return Vec::new();
         }
         self.stack.move_to_top(index);
+        self.resize_actions()
+    }
+
+    /// Gives the sheets at hand a wider (`step` of `1`) or narrower (`-1`)
+    /// share of the split.
+    ///
+    /// This is `prefix +` and `prefix -`: the two steps the run-time half of
+    /// the `--ratio` setting moves by. The share is one number -- the `num` of
+    /// the `num : 1` odds the stack splits by -- so the two commands are one
+    /// handler with a sign, exactly as the two focus steps are.
+    ///
+    /// The step is clamped ([`Ratio::MIN_NUM`](crate::Ratio::MIN_NUM),
+    /// [`Ratio::MAX_NUM`](crate::Ratio::MAX_NUM)), so at either end the share is
+    /// already what the step asks for and there is nothing to resize: the
+    /// command is a no-op rather than a share that grows without end or a sheet
+    /// squeezed away. Otherwise every region is re-derived -- the ratio is what
+    /// they are a function of -- so the sessions are resized to match.
+    ///
+    /// An empty stack has no split to resize, so it is a no-op for the same
+    /// reason a step is: there is nothing for the share to name.
+    fn handle_resize_split(&mut self, step: i64) -> Vec<Action> {
+        if self.stack.is_empty() {
+            return Vec::new();
+        }
+        let current = self.stack.ratio();
+        let next = if step > 0 {
+            current.widened()
+        } else {
+            current.narrowed()
+        };
+        if next == current {
+            return Vec::new();
+        }
+        self.stack.set_ratio(next);
         self.resize_actions()
     }
 

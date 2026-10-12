@@ -130,6 +130,58 @@ fn the_move_to_top_command_brings_the_sheet_under_the_keyboard_to_the_top() {
 }
 
 #[test]
+fn the_ratio_flag_sets_the_starting_split() {
+    // `$SHELL` is pinned to the silent script and `--ratio 2` asks for the
+    // `2 : 1` split at startup, so the first sheet takes two thirds of the
+    // columns and the one made after it takes the rest -- a layout a test can
+    // read off the border columns without ever pressing `+`.
+    let shell = silent_shell("ratio-flag");
+    let mut tumu = e2e::TumuHarness::with_args(24, 80, |command| {
+        command.env("SHELL", &shell);
+        command.arg("--orientation").arg("horizontal");
+        command.arg("--ratio").arg("2");
+    });
+    tumu.wait_for_column_text("[C-q ...]");
+
+    tumu.send_prefix();
+    tumu.send_char('c');
+    // Two thirds of 80 rounds up to 54, so the top sheet's border is at column
+    // 53 and the sheet below it at column 79.
+    tumu.wait_until("the starting split is two thirds", |h| {
+        h.screen_column(53).starts_with("└ [C-q ...]") && h.screen_column(79).starts_with("└")
+    });
+}
+
+#[test]
+fn the_split_steps_redraw_the_border_where_the_share_lands() {
+    let mut tumu = harness("split-steps");
+    tumu.wait_for_column_text("[C-q ...]");
+    tumu.send_prefix();
+    tumu.send_char('c');
+    // Two sheets at the default `1 : 1` split the 80 columns 40/40, so the top
+    // sheet's border is at column 39.
+    tumu.wait_until("two sheet borders", |h| {
+        h.screen_column(39).starts_with("└ [C-q ...]") && h.screen_column(79).starts_with("└")
+    });
+
+    // `+` widens the top sheet's share to `2 : 1`: two thirds of 80 rounds up
+    // to 54 columns, so its border moves to column 53 and the sheet below keeps
+    // the remaining 26.
+    tumu.send_prefix();
+    tumu.send_char('+');
+    tumu.wait_until("the top sheet grows to two thirds", |h| {
+        h.screen_column(53).starts_with("└ [C-q ...]") && h.screen_column(79).starts_with("└")
+    });
+
+    // `-` steps back to the halving, so the border returns to column 39.
+    tumu.send_prefix();
+    tumu.send_char('-');
+    tumu.wait_until("the split returns to half", |h| {
+        h.screen_column(39).starts_with("└ [C-q ...]")
+    });
+}
+
+#[test]
 fn the_full_screen_command_fills_the_terminal_and_folds_back() {
     let mut tumu = harness("full-screen");
     tumu.wait_for_column_text("[C-q ...]");

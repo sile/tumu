@@ -7,6 +7,31 @@
 //! rotation changes the rows being divided, not the odds dividing them, so the
 //! same ratio yields the same shape at any size.
 
+/// The parts the sheet at hand claims when the user has chosen nothing.
+///
+/// The default `1 : 1` is the halving the README spells out. It is written here
+/// rather than as a literal in `main` because `noargs` takes a `&'static str`;
+/// the binary spells the same number as its built-in default and the two must
+/// stay equal.
+pub const DEFAULT_NUM: u32 = 1;
+
+/// The widest a sheet's share may be made, as the `num` of a `num : 1` ratio.
+///
+/// A sheet claims `num` parts against the one part every sheet below it shares,
+/// so the odds are always `num : 1`. Past a handful the sheet is most of the
+/// screen and a step more is a change nobody can see, so `num` is kept within
+/// this bound: `prefix +` at the top of the range is a no-op rather than a
+/// ratio that grows without end.
+pub const MAX_NUM: u32 = 5;
+
+/// The narrowest a sheet's share may be made, as the `num` of a `num : 1`
+/// ratio.
+///
+/// One part is the least a sheet can claim while still taking it, so the odds
+/// never go below `1 : 1`: `prefix -` at the bottom of the range is a no-op
+/// rather than a sheet squeezed away.
+pub const MIN_NUM: u32 = 1;
+
 /// The odds one sheet claims against the space still below it.
 ///
 /// A ratio of `num : den` splits the rows left at each step so the sheet at
@@ -26,7 +51,10 @@ pub struct Ratio {
 
 impl Ratio {
     /// The odds the README gives: a sheet against all the rest, `1 : 1`.
-    pub const DEFAULT: Self = Self { num: 1, den: 1 };
+    pub const DEFAULT: Self = Self {
+        num: DEFAULT_NUM,
+        den: 1,
+    };
 
     /// Makes a ratio of `num : den`.
     ///
@@ -39,6 +67,62 @@ impl Ratio {
             None
         } else {
             Some(Self { num, den })
+        }
+    }
+
+    /// Makes the odds `num : 1`, clamping `num` into the adjustable range.
+    ///
+    /// This is the one-argument form the settings use: `--ratio N` and `prefix
+    /// +/-` speak of a sheet's share against everything below it as a single
+    /// number, and that number is always `num` against a fixed `den` of one.
+    /// Clamping rather than rejecting an out-of-range number means a `--ratio
+    /// 99` starts at the widest share tumu offers instead of refusing to run,
+    /// and a `0` starts at the narrowest instead of making a ratio of no odds.
+    pub const fn from_num(num: u32) -> Self {
+        let num = if num < MIN_NUM {
+            MIN_NUM
+        } else if num > MAX_NUM {
+            MAX_NUM
+        } else {
+            num
+        };
+        Self { num, den: 1 }
+    }
+
+    /// Returns the odds with the sheet's share one part wider, or the same odds
+    /// when it is already as wide as it may go.
+    ///
+    /// This is `prefix +`. Only `num` moves: `den` is kept, so in the `num : 1`
+    /// form every setting and step uses, the step is one part of a fixed shape
+    /// rather than a scaling of both sides. `num` is kept within
+    /// [`MIN_NUM`]..=[`MAX_NUM`], so at the ceiling the share in hand is what a
+    /// part wider asks for and the value comes back unchanged -- which is what
+    /// makes `prefix +` at the end a no-op.
+    pub fn widened(self) -> Self {
+        let next = self.num.saturating_add(1);
+        if next > MAX_NUM {
+            self
+        } else {
+            Self {
+                num: next,
+                den: self.den,
+            }
+        }
+    }
+
+    /// Returns the odds with the sheet's share one part narrower, or the same
+    /// odds when it is already as narrow as it may go.
+    ///
+    /// This is `prefix -`: the inverse of [`widened`](Ratio::widened).
+    pub fn narrowed(self) -> Self {
+        let next = self.num.saturating_sub(1);
+        if next < MIN_NUM {
+            self
+        } else {
+            Self {
+                num: next,
+                den: self.den,
+            }
         }
     }
 

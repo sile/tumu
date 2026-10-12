@@ -435,6 +435,113 @@ fn moving_a_single_sheet_does_nothing() {
 }
 
 #[test]
+fn a_state_carries_the_split_ratio_it_was_given() {
+    let state = state_with(24, 80, 1).with_ratio(tumu::Ratio::from_num(3));
+
+    assert_eq!(state.ratio(), tumu::Ratio::from_num(3));
+    assert_eq!(state.stack.ratio(), tumu::Ratio::from_num(3));
+}
+
+#[test]
+fn the_widen_split_command_grows_the_top_sheets_share_and_resizes() {
+    // Two sheets at 24 rows: with the default `1 : 1` they are 12/12. A step
+    // wider is `2 : 1`, so the top sheet takes 16 and the rest keeps 8.
+    let mut state = state_with(24, 80, 2).with_orientation(tumu::Orientation::Vertical);
+    state.stack.attach_session(0, session(1));
+    state.stack.attach_session(1, session(2));
+    let before = state.regions();
+    assert_eq!(before[0].size.rows, 12);
+
+    let actions = run_command(&mut state, '+');
+
+    assert_eq!(state.ratio(), tumu::Ratio::from_num(2));
+    let after = state.regions();
+    assert_eq!(after[0].size.rows, 16, "the top sheet takes more");
+    assert_eq!(after[1].size.rows, 8, "the sheet below takes the rest");
+    // Every region changed shape, so every session is resized to its content.
+    assert_eq!(
+        actions,
+        vec![
+            tumu::Action::ResizeSession {
+                index: 0,
+                size: termnix::Size {
+                    rows: std::num::NonZeroU16::new(15).expect("non-zero"),
+                    cols: std::num::NonZeroU16::new(80).expect("non-zero"),
+                },
+            },
+            tumu::Action::ResizeSession {
+                index: 1,
+                size: termnix::Size {
+                    rows: std::num::NonZeroU16::new(7).expect("non-zero"),
+                    cols: std::num::NonZeroU16::new(80).expect("non-zero"),
+                },
+            },
+        ]
+    );
+}
+
+#[test]
+fn the_narrow_split_command_shrinks_the_top_sheets_share() {
+    // Start wide (`3 : 1`) and step narrower: `2 : 1`, so the top sheet gives
+    // rows back to the sheet below.
+    let mut state = state_with(24, 80, 2)
+        .with_orientation(tumu::Orientation::Vertical)
+        .with_ratio(tumu::Ratio::from_num(3));
+    assert_eq!(state.regions()[0].size.rows, 18);
+
+    run_command(&mut state, '-');
+
+    assert_eq!(state.ratio(), tumu::Ratio::from_num(2));
+    assert_eq!(state.regions()[0].size.rows, 16);
+}
+
+#[test]
+fn the_split_steps_are_their_own_inverse_in_the_middle_of_the_range() {
+    let mut state = state_with(24, 80, 2).with_ratio(tumu::Ratio::from_num(3));
+    let before = state.regions();
+
+    run_command(&mut state, '+');
+    run_command(&mut state, '-');
+
+    assert_eq!(state.ratio(), tumu::Ratio::from_num(3));
+    assert_eq!(state.regions(), before, "a step back restores the layout");
+}
+
+#[test]
+fn widening_at_the_ceiling_does_nothing() {
+    // The share is already as wide as it may go, so the step asks for what is
+    // in hand: nothing is resized and the ratio is unchanged.
+    let mut state = state_with(24, 80, 2).with_ratio(tumu::Ratio::from_num(tumu::MAX_RATIO_NUM));
+
+    let actions = run_command(&mut state, '+');
+
+    assert!(actions.is_empty());
+    assert_eq!(state.ratio(), tumu::Ratio::from_num(tumu::MAX_RATIO_NUM));
+}
+
+#[test]
+fn narrowing_at_the_floor_does_nothing() {
+    let mut state = state_with(24, 80, 2).with_ratio(tumu::Ratio::from_num(tumu::MIN_RATIO_NUM));
+
+    let actions = run_command(&mut state, '-');
+
+    assert!(actions.is_empty());
+    assert_eq!(state.ratio(), tumu::Ratio::from_num(tumu::MIN_RATIO_NUM));
+}
+
+#[test]
+fn resizing_the_split_on_an_empty_stack_does_nothing() {
+    let mut state = tumu::State::new(size(24, 80));
+
+    let widen = run_command(&mut state, '+');
+    let narrow = run_command(&mut state, '-');
+
+    assert!(widen.is_empty());
+    assert!(narrow.is_empty());
+    assert_eq!(state.ratio(), tumu::Ratio::DEFAULT);
+}
+
+#[test]
 fn the_rotate_layout_command_flips_the_axis_and_resizes() {
     let mut state = state_with(24, 80, 1);
     state.stack.attach_session(0, session(1));

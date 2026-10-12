@@ -48,7 +48,14 @@ pub use input::{
 };
 pub use menu::{MenuLayout, MenuRow, SEND_PREFIX_LABEL, chord_text, ext_menu_layout, menu_layout};
 pub use orientation::Orientation;
-pub use ratio::Ratio;
+// The ratio's bounds are re-exported under names that say what they bound, so a
+// reader at the crate root does not have to know which module is the only one
+// with numbers in it. `MIN_RATIO_NUM` is exported for symmetry, though the
+// binary does not read it: `--ratio` clamps through `Ratio::from_num`, so the
+// floor is not spelled out there.
+pub use ratio::{
+    DEFAULT_NUM as DEFAULT_RATIO_NUM, MAX_NUM as MAX_RATIO_NUM, MIN_NUM as MIN_RATIO_NUM, Ratio,
+};
 pub use render::{
     SheetGrid, SheetGrids, draw_sheet_grid, frame, menu_frame, sheet_content_origin,
     sheet_content_size, sheet_frame,

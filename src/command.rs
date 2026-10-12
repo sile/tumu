@@ -8,8 +8,8 @@
 /// One command a prefix chord can trigger.
 ///
 /// The set is deliberately small: it is the least that makes the stack
-/// touchable by hand (add, close, step around, rotate, zoom, open the
-/// scrollback, leave). The ratio is the next addition and will extend this enum.
+/// touchable by hand (add, close, step around, move, resize the split, rotate,
+/// zoom, open the scrollback, leave).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Command {
     /// Add a new sheet on top of the stack.
@@ -54,6 +54,28 @@ pub enum Command {
     /// This is a rearrangement, not a view: the stack's order changes, so every
     /// region is re-derived and the sessions are resized to match.
     MoveSheetToTop,
+
+    /// Give the sheets at hand a wider share of the split.
+    ///
+    /// A stack splits what is left at each step in the proportion `num : 1`,
+    /// the sheet at hand against every sheet below it put together; this moves
+    /// `num` one part up, so each sheet that is not the bottom takes more and
+    /// the bottom takes what is left. It is `prefix +`, the counterpart of
+    /// [`NarrowSheet`](Command::NarrowSheet).
+    ///
+    /// This is a *layout* change, not a view one: every region is derived from
+    /// the ratio, so the sessions are resized to match. The ratio is bounded
+    /// ([`Ratio::MAX_NUM`](crate::Ratio::MAX_NUM)), so at the widest share the
+    /// command is a no-op rather than a share that grows without end.
+    WidenSheet,
+
+    /// Give the sheets at hand a narrower share of the split.
+    ///
+    /// The inverse of [`WidenSheet`](Command::WidenSheet): it moves `num` one
+    /// part down, so each sheet that is not the bottom takes less and the
+    /// bottom takes more. It is `prefix -`, and it is bounded below the same
+    /// way, so the odds never go past `1 : 1`.
+    NarrowSheet,
 
     /// Stack the sheets the other way: top to bottom, or left to right.
     ///
