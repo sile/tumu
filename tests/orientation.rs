@@ -1,68 +1,61 @@
-//! The axis is a pure function of the terminal's shape.
+//! The axis is a setting, not a function of the terminal's shape.
 
 mod helpers_tuinix;
 
 use helpers_tuinix::size;
 
 #[test]
-fn a_tall_terminal_stacks_vertically() {
-    // 40 rows against 80 columns: 40*2 = 80 >= 80, so vertical.
-    assert_eq!(
-        tumu::orientation_with_default_factor(size(40, 80)),
-        tumu::Orientation::Vertical
-    );
+fn the_default_is_vertical() {
+    // The one a run starts from, and the one the README's main figure draws.
+    assert_eq!(tumu::Orientation::DEFAULT, tumu::Orientation::Vertical);
 }
 
 #[test]
-fn a_wide_terminal_stacks_horizontally() {
-    // 24 rows against 80 columns: 24*2 = 48 < 80, so horizontal.
+fn flipping_is_its_own_inverse() {
     assert_eq!(
-        tumu::orientation_with_default_factor(size(24, 80)),
-        tumu::Orientation::Horizontal
-    );
-}
-
-#[test]
-fn a_square_terminal_stacks_vertically() {
-    // 40*2 = 80 >= 40 would be vertical even at factor one; a true tie at
-    // factor two is rows = cols/2, and here the taller side still wins.
-    assert_eq!(
-        tumu::orientation_with_default_factor(size(40, 40)),
-        tumu::Orientation::Vertical
-    );
-}
-
-#[test]
-fn a_factor_of_one_compares_the_sides_directly() {
-    assert_eq!(
-        tumu::orientation(size(24, 80), 1),
+        tumu::Orientation::Vertical.flipped(),
         tumu::Orientation::Horizontal
     );
     assert_eq!(
-        tumu::orientation(size(24, 20), 1),
+        tumu::Orientation::Horizontal.flipped(),
         tumu::Orientation::Vertical
     );
-    // A tie goes to vertical.
     assert_eq!(
-        tumu::orientation(size(24, 24), 1),
+        tumu::Orientation::Vertical.flipped().flipped(),
         tumu::Orientation::Vertical
     );
 }
 
 #[test]
-fn rotation_flips_the_axis() {
-    // The whole point: a rotation swaps the sides, so the axis follows without
-    // anything being stored. At the default factor a cell counts double, so a
-    // 6-inch panel's pre- and post-rotation sizes look like these.
-    let portrait = size(40, 30);
-    let landscape = size(30, 80);
+fn a_name_parses_back_to_its_orientation() {
+    // The CLI accepts what `name` prints, so the two cannot drift.
+    for orientation in [tumu::Orientation::Vertical, tumu::Orientation::Horizontal] {
+        assert_eq!(
+            tumu::Orientation::parse(orientation.name()),
+            Some(orientation)
+        );
+    }
+    assert_eq!(tumu::Orientation::parse("Vertical"), None);
+    assert_eq!(tumu::Orientation::parse(""), None);
+    assert_eq!(tumu::Orientation::parse("rows"), None);
+}
 
-    assert_eq!(
-        tumu::orientation_with_default_factor(portrait),
-        tumu::Orientation::Vertical
-    );
-    assert_eq!(
-        tumu::orientation_with_default_factor(landscape),
-        tumu::Orientation::Horizontal
-    );
+#[test]
+fn the_state_keeps_the_axis_it_was_given() {
+    // The shape has no say any more: the same wide terminal takes whichever
+    // axis the caller set, and a resize does not change it.
+    let mut state = tumu::State::new(size(24, 80)).with_orientation(tumu::Orientation::Vertical);
+    assert_eq!(state.orientation(), tumu::Orientation::Vertical);
+
+    state.update(tumu::Event::Resize(size(80, 24)));
+    assert_eq!(state.orientation(), tumu::Orientation::Vertical);
+
+    let state = tumu::State::new(size(24, 80)).with_orientation(tumu::Orientation::Horizontal);
+    assert_eq!(state.orientation(), tumu::Orientation::Horizontal);
+}
+
+#[test]
+fn a_new_state_starts_from_the_default() {
+    let state = tumu::State::new(size(24, 80));
+    assert_eq!(state.orientation(), tumu::Orientation::DEFAULT);
 }

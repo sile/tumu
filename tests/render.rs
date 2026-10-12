@@ -7,17 +7,24 @@
 //! thing, so these assert on `tumu::frame`.
 //!
 //! The border runs along the stack's axis -- the last row when the stack is
-//! vertical, the last column when it is horizontal -- so a test picks a size
-//! that stacks the way it means to assert on: a tall, narrow terminal stacks
-//! vertically, a wide, short one horizontally.
+//! vertical, the last column when it is horizontal -- and the axis is a
+//! setting, so a test names the one it means rather than picking a size that
+//! used to imply it.
 
 mod helpers_tuinix;
 
 use helpers_tuinix::size;
 
-/// Builds a state whose first sheet is focused, as startup leaves it.
-fn started(rows: usize, cols: usize) -> tumu::State {
-    let mut state = tumu::State::new(size(rows, cols));
+/// Vertical, for the tests whose border is a row.
+const VERTICAL: tumu::Orientation = tumu::Orientation::Vertical;
+
+/// Horizontal, for the tests whose border is a column.
+const HORIZONTAL: tumu::Orientation = tumu::Orientation::Horizontal;
+
+/// Builds a state of `rows`x`cols` stacked along `orientation`, whose first
+/// sheet is focused, as startup leaves it.
+fn started(rows: usize, cols: usize, orientation: tumu::Orientation) -> tumu::State {
+    let mut state = tumu::State::new(size(rows, cols)).with_orientation(orientation);
     state.update(tumu::Event::Resize(size(rows, cols)));
     state
 }
@@ -93,7 +100,7 @@ fn the_renderer_never_paints_outside_the_frame() {
 #[test]
 fn a_vertical_border_names_the_focused_sheet_with_the_label() {
     // A tall, narrow terminal stacks vertically, so the border is the last row.
-    let state = started(24, 40);
+    let state = started(24, 40, VERTICAL);
 
     let frame = tumu::frame(&state, &no_grids());
     let bottom = row_text(&frame, 23);
@@ -114,7 +121,7 @@ fn a_vertical_border_names_the_focused_sheet_with_the_label() {
 fn an_unfocused_border_has_no_label() {
     // Two sheets stacked vertically: the focused one (on top) carries the
     // label, the other (below) does not.
-    let mut state = started(24, 40);
+    let mut state = started(24, 40, VERTICAL);
     state.stack.push_top();
     // Move focus off the top sheet, so the one below it is the unfocused case.
     let second = state.stack.sheets()[1].0;
@@ -132,7 +139,7 @@ fn an_unfocused_border_has_no_label() {
 fn a_horizontal_border_is_written_vertically_in_the_last_column() {
     // A wide, short terminal stacks horizontally, so the border is the last
     // column of the sheet, the text read top to bottom.
-    let state = started(24, 80);
+    let state = started(24, 80, HORIZONTAL);
 
     let frame = tumu::frame(&state, &no_grids());
     let right = col_text(&frame, 79);
@@ -154,7 +161,7 @@ fn a_narrow_sheet_does_not_leak_its_border_onto_its_neighbour() {
     // last column, so index 1's is column 79 and index 0's is column 39. The
     // focused sheet (index 1) sets a title longer than 40 rows: the border must
     // be clipped at its own bottom edge and leave sheet 0 alone.
-    let mut state = started(24, 80);
+    let mut state = started(24, 80, HORIZONTAL);
     state.stack.push_top();
     state.update(tumu::Event::TitleChanged {
         index: 1,
@@ -193,7 +200,7 @@ fn a_sheet_with_no_contents_shows_only_its_border() {
     // Tall enough to stack vertically and wide enough that the border's text
     // fits on its row (a narrower sheet clips the label itself, which is its
     // own case elsewhere).
-    let state = started(24, 40);
+    let state = started(24, 40, VERTICAL);
 
     let frame = tumu::frame(&state, &no_grids());
 
@@ -241,12 +248,12 @@ fn contents_are_painted_to_the_left_of_the_border_and_clipped_at_the_sheet_edge(
         }
     }
 
-    // One sheet, tall enough to stack vertically while still wide enough for
-    // the border's text, with a grid whose first row is longer than the sheet is
-    // wide. The border owns the last row; the grid starts at row 0 and must
+    // One sheet, stacked vertically so the border owns the last *row* while the
+    // sheet is still wide enough for the border's text, with a grid whose first
+    // row is longer than the sheet is wide. The grid starts at row 0 and must
     // stop at the sheet's right edge.
     const COLS: usize = 20;
-    let state = started(24, COLS);
+    let state = started(24, COLS, VERTICAL);
     let long: Vec<Cell> = "abcdefghijklmnopqrstuvwxyz".chars().map(cell).collect();
     let rows = vec![long.as_slice()];
     let grid = tumu::SheetGrid {
@@ -275,7 +282,7 @@ fn contents_are_painted_to_the_left_of_the_border_and_clipped_at_the_sheet_edge(
 
 #[test]
 fn the_menu_is_painted_over_the_sheets_when_it_is_open() {
-    let mut state = started(24, 40);
+    let mut state = started(24, 40, VERTICAL);
     assert!(!state.menu, "the menu is closed at startup");
 
     state.menu = true;
@@ -303,7 +310,7 @@ fn the_menu_is_painted_over_the_sheets_when_it_is_open() {
 
 #[test]
 fn a_closed_menu_paints_nothing_over_the_sheets() {
-    let mut state = started(24, 40);
+    let mut state = started(24, 40, VERTICAL);
     state.menu = false;
 
     let frame = tumu::frame(&state, &no_grids());
@@ -315,7 +322,7 @@ fn a_closed_menu_paints_nothing_over_the_sheets() {
 
 #[test]
 fn the_menu_paints_the_rows_the_layout_names() {
-    let mut state = started(24, 40);
+    let mut state = started(24, 40, VERTICAL);
     state.menu = true;
     let layout = state.menu_layout().expect("the menu fits 24x40");
     let frame = tumu::frame(&state, &no_grids());

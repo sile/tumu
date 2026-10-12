@@ -29,8 +29,12 @@ fn silent_shell(name: &str) -> PathBuf {
     path
 }
 
-/// Opens a 24x80 harness whose sheet runs a silent shell, with `setup` free to
-/// add a `--prefix` argument or a `$TUMU_PREFIX` to the command.
+/// Opens a 24x80 harness whose sheet runs a silent shell, stacked
+/// horizontally, with `setup` free to add a `--prefix` argument or a
+/// `$TUMU_PREFIX` to the command.
+///
+/// Horizontal so the border is a column and the assertions below can name one;
+/// the axis is a setting, so it has to be asked for like any other.
 fn harness<F>(name: &str, setup: F) -> e2e::TumuHarness
 where
     F: FnOnce(&mut std::process::Command),
@@ -39,6 +43,7 @@ where
     let shell = shell.to_str().expect("utf-8 path").to_string();
     e2e::TumuHarness::with_args(24, 80, move |command| {
         command.env("SHELL", &shell);
+        command.args(["--orientation", "horizontal"]);
         setup(command);
     })
 }

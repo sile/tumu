@@ -58,6 +58,22 @@ fn main() -> noargs::Result<()> {
         .take(&mut args)
         .then(|a| single_char(a.value()))?;
 
+    // Which way the sheets stack. It used to be derived from the terminal's
+    // shape, which made a rotation flip the layout by itself; now it is a
+    // setting, chosen here once and then by `prefix r` at run time. The flag,
+    // the environment, and the built-in default come from this one declaration,
+    // in the same precedence as `--scrollback`. The default is the library's own
+    // constant spelled out as a literal because `noargs` takes a `&'static str`;
+    // it must stay equal to `tumu::Orientation::DEFAULT`.
+    let orientation: tumu::Orientation = noargs::opt("orientation")
+        .short('O')
+        .ty("ORIENTATION")
+        .env("TUMU_ORIENTATION")
+        .default("vertical")
+        .doc("How the sheets stack: `vertical` or `horizontal`")
+        .take(&mut args)
+        .then(|a| orientation_name(a.value()))?;
+
     if let Some(help) = args.finish()? {
         print!("{help}");
         return Ok(());
@@ -74,7 +90,9 @@ fn main() -> noargs::Result<()> {
     let shell = shell_command();
     let editor = editor_command();
     let editor_dir = editor_dir();
-    let state = tumu::State::new(seed).with_prefix_char(prefix_char);
+    let state = tumu::State::new(seed)
+        .with_prefix_char(prefix_char)
+        .with_orientation(orientation);
     match app::App::new(state, shell, editor, scrollback, editor_dir) {
         Ok(mut app) => app.run()?,
         Err(err) => {
@@ -98,6 +116,18 @@ fn single_char(text: &str) -> Result<char, String> {
         (Some(c), None) => Ok(c),
         _ => Err(format!("expected a single character, got `{text}`")),
     }
+}
+
+/// Parses `text` as an orientation name.
+///
+/// The two words are `vertical` and `horizontal`, the spelling
+/// [`Orientation::name`](tumu::Orientation::name) produces, so the value a user
+/// types and the value the menu label comes from are the same word. Anything
+/// else is a parse error rather than a silent fallback, so a mistyped
+/// `--orientation` is reported instead of leaving the default in place.
+fn orientation_name(text: &str) -> Result<tumu::Orientation, String> {
+    tumu::Orientation::parse(text)
+        .ok_or_else(|| format!("expected `vertical` or `horizontal`, got `{text}`"))
 }
 
 /// Builds the recipe for the external editor `prefix l` opens in a new sheet.

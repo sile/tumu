@@ -7,11 +7,13 @@
 //! command label (`[C-q ...]`), so the assertions below double as a check on
 //! where focus is.
 //!
-//! The default 24x80 is wider than tall, so the stack lays out *horizontally*
-//! and each sheet's border runs down its right column. The border text is
-//! therefore read column by column (`wait_for_column_text`), not row by row.
-//! A sheet's border column is its own last column, so the top sheet's is at
-//! column 39 and the sheet below it at column 79.
+//! These run their sheets *horizontally* (`--orientation horizontal`), so each
+//! sheet's border runs down its right column and the border text is read
+//! column by column (`wait_for_column_text`), not row by row. A sheet's border
+//! column is its own last column, so the top sheet's is at column 39 and the
+//! sheet below it at column 79. The axis is a setting now, so the vertical case
+//! is exercised on its own in `e2e_orientation.rs`; choosing it here keeps the
+//! assertions below about *where* a sheet ends, not which way the stack runs.
 //!
 //! Every test pins `$SHELL` to a silent script, so a sheet's border shows only
 //! tumu's own text. A real login shell sets a window title of its own (fish
@@ -34,10 +36,15 @@ fn silent_shell(name: &str) -> PathBuf {
     path
 }
 
-/// Opens a harness whose sheets run a silent shell.
+/// Opens a harness whose sheets run a silent shell, stacked horizontally.
 fn harness(name: &str) -> e2e::TumuHarness {
     let shell = silent_shell(name);
-    e2e::TumuHarness::with_shell(24, 80, shell.to_str().expect("utf-8 path"))
+    e2e::TumuHarness::with_shell_and_orientation(
+        24,
+        80,
+        shell.to_str().expect("utf-8 path"),
+        "horizontal",
+    )
 }
 
 #[test]

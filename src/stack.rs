@@ -119,26 +119,34 @@ impl Stack {
         }
     }
 
-    /// Returns the region of every sheet, top to bottom (or left to right
-    /// when the terminal is wider than it is tall), for a terminal of `size`.
+    /// Returns the region of every sheet, top to bottom (or left to right in a
+    /// horizontal stack), for a terminal of `size`.
     ///
-    /// The derivation is a left fold over the sheets along the terminal's
-    /// [orientation](crate::orientation). Each sheet takes its share of the
-    /// cells left, measured against everything still below it as a single
-    /// opponent; the last sheet takes whatever remains. The share is the
-    /// stack's [ratio](Stack::ratio) read as `sheet : rest`, so the default
-    /// `1 : 1` halves the space at each step: two sheets are `1:1` and three
-    /// are `1:1` then `1:1` of the rest -- exactly the odds the README gives.
+    /// The derivation is a left fold over the sheets along `orientation`.
+    /// Each sheet takes its share of the cells left, measured against
+    /// everything still below it as a single opponent; the last sheet takes
+    /// whatever remains. The share is the stack's [ratio](Stack::ratio) read as
+    /// `sheet : rest`, so the default `1 : 1` halves the space at each step:
+    /// two sheets are `1:1` and three are `1:1` then `1:1` of the rest --
+    /// exactly the odds the README gives.
+    ///
+    /// The axis is an argument rather than something read from `size`, because
+    /// it is a setting: the same terminal can stack either way, and the size
+    /// alone no longer decides.
     ///
     /// The regions are returned in stack order and their extents along the axis
     /// sum to the terminal's, the last taking whatever remains.
-    pub fn regions(&self, size: tuinix::Size) -> Vec<tuinix::Region> {
+    pub fn regions(
+        &self,
+        size: tuinix::Size,
+        orientation: crate::Orientation,
+    ) -> Vec<tuinix::Region> {
         let mut regions = Vec::with_capacity(self.sheets.len());
         if self.sheets.is_empty() {
             return regions;
         }
 
-        let axis = crate::orientation_with_default_factor(size);
+        let axis = orientation;
         let mut remaining = geometry::terminal_region(size);
         for index in 0..self.sheets.len() {
             let is_last = index + 1 == self.sheets.len();
@@ -170,20 +178,31 @@ impl Stack {
     }
 
     /// Returns the region of the sheet at `index`, top to bottom, for a
-    /// terminal of `size`.
+    /// terminal of `size` laid out along `orientation`.
     ///
     /// Returns `None` when there is no such sheet.
-    pub fn region_of(&self, index: usize, size: tuinix::Size) -> Option<tuinix::Region> {
-        self.regions(size).into_iter().nth(index)
+    pub fn region_of(
+        &self,
+        index: usize,
+        size: tuinix::Size,
+        orientation: crate::Orientation,
+    ) -> Option<tuinix::Region> {
+        self.regions(size, orientation).into_iter().nth(index)
     }
 
-    /// Returns the index of the sheet at `position` in a terminal of `size`,
-    /// top to bottom, or `None` when the position is outside every sheet.
+    /// Returns the index of the sheet at `position` in a terminal of `size`
+    /// laid out along `orientation`, or `None` when the position is outside
+    /// every sheet.
     ///
     /// The topmost sheet wins when regions overlap, so the first match in
     /// stack order is returned.
-    pub fn hit_test(&self, position: tuinix::Position, size: tuinix::Size) -> Option<usize> {
-        self.regions(size).iter().position(|region| {
+    pub fn hit_test(
+        &self,
+        position: tuinix::Position,
+        size: tuinix::Size,
+        orientation: crate::Orientation,
+    ) -> Option<usize> {
+        self.regions(size, orientation).iter().position(|region| {
             let row_in = position.row >= region.position.row
                 && position.row < region.position.row + region.size.rows;
             let col_in = position.col >= region.position.col

@@ -5,9 +5,11 @@
 //! focused sheet carries the command label (`[C-q ...]`) -- so "the click moved
 //! focus" is an assertion about the frame, not about the core's internals.
 //!
-//! The default 24x80 is wider than tall, so two sheets split the columns 40/40
-//! and each border runs down its right column: the upper sheet's at column 39,
-//! the lower one's at column 79. Focus is read from those columns.
+//! The focus tests run their sheets *horizontally* (`--orientation
+//! horizontal`), so two sheets split the columns 40/40 and each border runs
+//! down its right column: the upper sheet's at column 39, the lower one's at
+//! column 79. Focus is read from those columns. The forwarding tests use a
+//! single vertical sheet instead, and ask for it; the axis is a setting now.
 //!
 //! The reports go through `termnix`, which only encodes one when the child has
 //! asked for mouse reporting; that `tumu` has (see `App::new`) is part of what
@@ -60,10 +62,15 @@ fn silent_shell(name: &str) -> PathBuf {
     path
 }
 
-/// Opens a harness whose sheets run a silent shell.
+/// Opens a harness whose sheets run a silent shell, stacked horizontally.
 fn harness(name: &str) -> e2e::TumuHarness {
     let shell = silent_shell(name);
-    e2e::TumuHarness::with_shell(24, 80, shell.to_str().expect("utf-8 path"))
+    e2e::TumuHarness::with_shell_and_orientation(
+        24,
+        80,
+        shell.to_str().expect("utf-8 path"),
+        "horizontal",
+    )
 }
 #[test]
 fn clicking_a_sheet_moves_focus_to_it() {
@@ -193,7 +200,12 @@ fn a_child_that_asks_for_the_mouse_receives_the_report() {
     // change to make is the cleanest case: with the child asking, the report is
     // the child's.
     let shell = mouse_asking_shell("receives");
-    let mut tumu = e2e::TumuHarness::with_shell(30, 40, shell.to_str().expect("utf-8 path"));
+    let mut tumu = e2e::TumuHarness::with_shell_and_orientation(
+        30,
+        40,
+        shell.to_str().expect("utf-8 path"),
+        "vertical",
+    );
     tumu.wait_for_text("MOUSE-ASKED");
 
     tumu.click(5, 10);
@@ -213,7 +225,12 @@ fn a_child_that_has_not_asked_never_sees_a_report() {
     // click must move the focus (a no-op here, there is one sheet) and reach no
     // child: the marker is the last thing on the grid.
     let shell = script_without_ask("ignores");
-    let mut tumu = e2e::TumuHarness::with_shell(30, 40, shell.to_str().expect("utf-8 path"));
+    let mut tumu = e2e::TumuHarness::with_shell_and_orientation(
+        30,
+        40,
+        shell.to_str().expect("utf-8 path"),
+        "vertical",
+    );
     tumu.wait_for_text("MOUSE-ASKED");
 
     tumu.click(5, 10);

@@ -44,6 +44,16 @@ pub struct State {
     /// [`handle_key`](State::handle_key) for the rule.
     pub prefix: bool,
 
+    /// Which way the sheets stack: top to bottom, or left to right.
+    ///
+    /// It is a setting, not a function of the terminal's shape. It used to be
+    /// derived from the size, which is why a rotation flipped the stack by
+    /// itself; now the axis changes only when `prefix r` (or `--orientation`)
+    /// asks for it, so a resize re-lays the stack out along the axis it already
+    /// has. Every region is a pure function of this and the size, so nothing
+    /// has to be recomputed or stored when it flips.
+    pub orientation: crate::Orientation,
+
     /// The character the prefix key carries, `Ctrl` fixed.
     ///
     /// Only the character is configurable -- see
@@ -119,6 +129,7 @@ impl State {
             size,
             prefix: false,
             prefix_char: crate::input::DEFAULT_PREFIX_CHAR,
+            orientation: crate::Orientation::DEFAULT,
             menu: false,
             mouse_wanted: false,
             held_button: None,
@@ -140,17 +151,27 @@ impl State {
         self
     }
 
-    /// Returns the axis the stack is laid out along at the current size.
+    /// Sets the axis the sheets stack along and returns the state.
+    ///
+    /// Like the prefix character, it is set once, from what the edge read off
+    /// the command line and the environment -- see the binary's `main` -- and
+    /// from then on it is `prefix r` that changes it. It is the one source of
+    /// the axis: the split, the border's edge, and the menu's label all read it
+    /// back, so they cannot disagree with each other or with the setting.
+    pub fn with_orientation(mut self, orientation: crate::Orientation) -> Self {
+        self.orientation = orientation;
+        self
+    }
+
+    /// Returns the axis the stack is laid out along.
     ///
     /// The renderer needs it to know which edge of a sheet carries the border:
     /// the last row when the stack runs vertically, the last column when it
-    /// runs horizontally. It is the same function the stack splits its regions
-    /// with
-    /// ([`orientation_with_default_factor`](crate::orientation_with_default_factor))
-    /// read from the same size, so the border's edge and the split's axis
-    /// cannot disagree.
+    /// runs horizontally. It is the stored setting, so the border's edge and
+    /// the split's axis cannot disagree: [`regions`](State::regions) splits by
+    /// this value and the border is drawn by it.
     pub fn orientation(&self) -> crate::Orientation {
-        crate::orientation_with_default_factor(self.size)
+        self.orientation
     }
 
     /// Returns the menu's layout at the current size, or `None` when it does
@@ -402,6 +423,7 @@ impl State {
             Command::NewSheet => self.handle_new_sheet(),
             Command::CloseSheet => self.handle_close_sheet(),
             Command::RotateSheets => self.handle_rotate_sheets(),
+            Command::RotateOrientation => self.handle_rotate_orientation(),
             Command::ToggleFullScreen => self.handle_toggle_full_screen(),
             Command::EditScrollback => self.handle_edit_scrollback(),
             Command::PasteClipboard => self.handle_paste_clipboard(),
@@ -578,6 +600,21 @@ impl State {
         vec![Action::PasteClipboard { index }]
     }
 
+    /// Stacks the sheets the other way and resizes every sheet to match.
+    ///
+    /// It is *layout*, not a view: every region takes a different shape, so the
+    /// sessions are resized to it. It replaces the automatic flip a device
+    /// rotation used to cause, so the axis changes only when it is asked to; a
+    /// [`Resize`](Event::Resize) re-lays the stack out along the axis it already
+    /// has.
+    ///
+    /// The toggle is its own inverse, so there is no second state to keep in
+    /// step and nothing to remember.
+    fn handle_rotate_orientation(&mut self) -> Vec<Action> {
+        self.orientation = self.orientation.flipped();
+        self.resize_actions()
+    }
+
     /// Flips full screen and resizes every sheet to match the new layout.
     ///
     /// Neither capture nor restore touches the stack: the focused sheet's
@@ -612,15 +649,15 @@ impl State {
     /// which both stops the edge from drawing them and stops
     /// [`resize_actions`](State::resize_actions) from resizing their sessions to
     /// a zero grid. The regions the other sheets would have had are not lost --
-    /// they are the same pure function of the size, the order, and the ratio, so
-    /// clearing the flag brings them straight back.
+    /// they are the same pure function of the size, the order, the ratio, and
+    /// the orientation, so clearing the flag brings them straight back.
     ///
     /// The returned vector is always as long as the stack; a sheet the full
     /// screen hides has an empty region at its index rather than no entry, so an
     /// index still names the same sheet whether or not it is on show.
     pub fn regions(&self) -> Vec<tuinix::Region> {
         if !self.full_screen {
-            return self.stack.regions(self.size);
+            return self.stack.regions(self.size, self.orientation);
         }
         let focused = self.focused_index();
         let full = crate::terminal_region(self.size);
@@ -645,8 +682,11 @@ impl State {
     ///
     /// A new sheet is spawned when the stack was empty, so startup and the
     /// first resize share one path. Every sheet's session is resized to the
-    /// region the new size gives it, which is how a rotation reaches the
-    /// children.
+    /// region the new size gives it, so a rotation or a window change reaches
+    /// the children. The *axis* is not touched: a resize re-lays the stack out
+    /// along the orientation it already has, which is why rotating the device
+    /// no longer rearranges the sheets -- `prefix r` does that, and only when
+    /// pressed.
     fn handle_resize(&mut self, size: tuinix::Size) -> Vec<Action> {
         self.size = size;
         let mut actions = Vec::new();

@@ -11,7 +11,7 @@ tumu
 - Feature
   - Stacked sheets (see below)
   - No sessions, panes, pop-up windows
-  - Detect device orientation changes (via terminal size change event)
+  - Stacking axis set by `prefix r` or `--orientation`
   - No server (a standalone process)
   - Mouse: click a sheet to focus it; a sheet's program gets the mouse when it
   asks for it
@@ -55,9 +55,12 @@ $            |[C |   s2    |
 - When new sheet is created, it stacked to the top of the stack.
 - each sheet size is decided automatically
   - e.g., s1:remainings = 1:1, remaining1:remaining-others = 1:1, ....
-  - odds rate can be changes. but the sheet sizes are calculated automatically to make it easy to support display rotation
+  - odds rate can be changes. but the sheet sizes are calculated automatically, so a
+    resize (a rotation, most of all) re-lays the stack out rather than moving it
 - a sheet can be swaped to the top, or, move to the stop
 - support full screen mode (like tmux does)
+- the stacking axis is a setting, not a guess: `--orientation vertical|horizontal`
+  (or `$TUMU_ORIENTATION`) picks it at startup and `prefix r` flips it
 - a prefix chord starts tumu commands (see `Keys` below)
 
 Sheet border
@@ -86,9 +89,37 @@ Vertically the sheets stack down the screen, so a sheet's line runs along its
 **right** edge. Either way the sheet after it in the stack starts on the far
 side of that line, and each sheet keeps its own line and its own title.
 
-The axis is not a setting, so a rotation flips the border with the layout. The
-label `[C-q ...]` is drawn only on the focused sheet, so which sheet the keyboard
-is aimed at is visible in the frame alone.
+The axis is a setting (`prefix r`, or `--orientation` at startup), so the border
+follows it: flipping the axis moves the line from a sheet's bottom edge to its
+right edge and back. A device rotation does **not** flip it -- a resize re-lays
+the sheets out along the axis they already have, so the arrangement only changes
+when it is asked to. The label `[C-q ...]` is drawn only on the focused sheet, so
+which sheet the keyboard is aimed at is visible in the frame alone.
+
+Orientation
+-----------
+
+Which way the sheets stack is a setting, not something derived from the
+terminal's shape:
+
+- `--orientation ORIENTATION` (or `-O ORIENTATION`)
+- `$TUMU_ORIENTATION`
+
+The value is `vertical` (sheets top to bottom, the default) or `horizontal`
+(sheets left to right). The flag wins over the environment, the environment over
+the default, exactly as for `--scrollback` and `--prefix`. A value that is
+neither word is an error rather than a silent fallback.
+
+`prefix r` flips the axis while tumu runs. It is a *layout* change, not a view
+one: every sheet's region takes a different shape, so the children are resized
+to match.
+
+The axis used to be derived from the terminal's size, so rotating the device
+flipped the stack by itself. That is gone: the shape is a poor proxy for the
+intent (a phone in landscape and a laptop in landscape are the same shape and
+want different stacks), and rearranging the sheets because the device turned is
+surprising rather than helpful. A resize now re-lays the stack out along the axis
+it already has, and the axis changes only when asked.
 
 Keys
 ----
@@ -114,6 +145,7 @@ and the setting needs no check against the binding table.
 - `prefix n` -- new sheet on top
 - `prefix x` -- close the focused sheet
 - `prefix o` -- move the focused sheet to the bottom
+- `prefix r` -- flip the stacking axis (vertical / horizontal)
 - `prefix z` -- show the focused sheet full screen, and back
 - `prefix l` -- open the focused sheet's scrollback in an editor (see below)
 - `prefix y` -- paste the clipboard into the focused sheet (see below)

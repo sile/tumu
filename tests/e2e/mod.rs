@@ -67,6 +67,32 @@ impl TumuHarness {
         })
     }
 
+    /// Launches the `tumu` binary with `--orientation` set.
+    ///
+    /// The axis is a setting now, so a test that cares which way the sheets
+    /// stack has to ask for it; leaving it out is the vertical default.
+    pub fn with_orientation(rows: u16, cols: u16, orientation: &str) -> Self {
+        let orientation = orientation.to_string();
+        Self::spawn(rows, cols, move |command| {
+            command.arg("--orientation").arg(orientation);
+        })
+    }
+
+    /// Launches the `tumu` binary with `$SHELL` pinned and `--orientation` set.
+    pub fn with_shell_and_orientation(
+        rows: u16,
+        cols: u16,
+        shell: &str,
+        orientation: &str,
+    ) -> Self {
+        let shell = shell.to_string();
+        let orientation = orientation.to_string();
+        Self::spawn(rows, cols, move |command| {
+            command.env("SHELL", shell);
+            command.arg("--orientation").arg(orientation);
+        })
+    }
+
     /// Launches the `tumu` binary, letting `setup` adjust the command first.
     ///
     /// This is the escape hatch for the tests that need an argument or an

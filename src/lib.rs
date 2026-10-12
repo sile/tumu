@@ -47,9 +47,7 @@ pub use input::{
     prefix_key_text,
 };
 pub use menu::{MenuLayout, MenuRow, SEND_PREFIX_LABEL, chord_text, menu_layout};
-pub use orientation::{
-    DEFAULT_CELL_ASPECT, Orientation, orientation, orientation_with_default_factor,
-};
+pub use orientation::Orientation;
 pub use ratio::Ratio;
 pub use render::{
     SheetGrid, SheetGrids, draw_sheet_grid, frame, menu_frame, sheet_content_origin,

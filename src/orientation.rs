@@ -1,16 +1,16 @@
-//! Which way a stack stacks: a pure function of the terminal's shape.
+//! Which way a stack stacks: a setting, not a guess.
 //!
-//! The axis is not a setting. A stack is laid out along the longer side of the
-//! display, so the two arrangements the README draws are the same arrangement
-//! seen before and after a rotation: the terminal's size change flips the axis,
-//! and every region is re-derived from it. Keeping the choice out of the state
-//! is what lets the rotation be handled by the one `Resize` event.
+//! The axis used to be derived from the terminal's shape, so a rotation flipped
+//! it by itself. That is gone: the axis is chosen by the user (`prefix r`, or
+//! `--orientation` at startup) and the terminal's size no longer has an opinion
+//! about it. The shape was a bad proxy for the intent -- a phone in landscape
+//! and a laptop in landscape are the same shape and want different stacks --
+//! and flipping the layout out from under a running program because the device
+//! turned is surprising rather than helpful.
 //!
-//! Comparing the rows to the columns is not quite comparing the sides, because
-//! a cell is taller than it is wide. A `factor` stands for that cell aspect: the
-//! effective height is `rows * factor` cells against `cols`. It is a plain
-//! argument so that a terminal which reports its pixel size can pass the real
-//! ratio in, while the default assumes the usual cell.
+//! What is left here is the setting itself: the two values, the one a run
+//! starts from, and how the setting is spelled on the command line, in the
+//! environment, and in the menu.
 
 /// The direction a stack grows in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -22,31 +22,45 @@ pub enum Orientation {
     Horizontal,
 }
 
-/// The height of one cell as a multiple of its width.
-///
-/// Cells are about twice as tall as they are wide, so a terminal whose rows
-/// and columns are equal is really taller than it is wide -- about `2 : 1`.
-/// This is the default `factor` used when nothing better is known.
-pub const DEFAULT_CELL_ASPECT: u32 = 2;
+impl Orientation {
+    /// The orientation a run starts from when nothing overrides it: vertical,
+    /// which is how the README's main figure stacks.
+    pub const DEFAULT: Self = Self::Vertical;
 
-/// Returns the axis a terminal of `size` should stack along.
-///
-/// The taller side wins, counting the rows at `factor` times their number so
-/// that the comparison is between the sides as they look. A tie is vertical, so
-/// a square display stacks the way the README's main figure does. The rows are
-/// scaled in `u64` so a very large terminal cannot overflow the product.
-pub fn orientation(size: tuinix::Size, factor: u32) -> Orientation {
-    let height = (size.rows as u64) * u64::from(factor);
-    let width = size.cols as u64;
-    if height >= width {
-        Orientation::Vertical
-    } else {
-        Orientation::Horizontal
+    /// Returns the other orientation.
+    ///
+    /// This is the whole of `prefix r`: the toggle is its own inverse, so
+    /// nothing has to be remembered and there are no two values to keep in
+    /// step.
+    pub const fn flipped(self) -> Self {
+        match self {
+            Self::Vertical => Self::Horizontal,
+            Self::Horizontal => Self::Vertical,
+        }
     }
-}
 
-/// Returns the axis a terminal of `size` should stack along, using the default
-/// [cell aspect](DEFAULT_CELL_ASPECT).
-pub fn orientation_with_default_factor(size: tuinix::Size) -> Orientation {
-    orientation(size, DEFAULT_CELL_ASPECT)
+    /// Returns how the orientation is spelled on the command line and in the
+    /// environment: `vertical` or `horizontal`.
+    ///
+    /// [`parse`](Self::parse) accepts the same word, so the spelling a user
+    /// types and the spelling that comes back out cannot drift.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Vertical => "vertical",
+            Self::Horizontal => "horizontal",
+        }
+    }
+
+    /// Parses the name of an orientation, in the spelling
+    /// [`name`](Self::name) produces.
+    ///
+    /// Returns `None` for anything else, so a mistyped `--orientation` is
+    /// reported by the caller rather than silently falling back to the default.
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "vertical" => Some(Self::Vertical),
+            "horizontal" => Some(Self::Horizontal),
+            _ => None,
+        }
+    }
 }

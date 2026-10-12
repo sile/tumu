@@ -21,6 +21,14 @@ pub enum Command {
     /// Move the focused sheet to the bottom, bringing the next one up.
     RotateSheets,
 
+    /// Stack the sheets the other way: top to bottom, or left to right.
+    ///
+    /// This is a *layout* change, not a view one: every sheet's region takes a
+    /// different shape, so the sessions are resized to match. It replaces the
+    /// automatic flip a device rotation used to cause, so the axis now changes
+    /// only when it is asked to.
+    RotateOrientation,
+
     /// Show the focused sheet full screen, or fold it back into the stack.
     ///
     /// This is tmux's zoom: a view, not a rearrangement. The stack keeps its

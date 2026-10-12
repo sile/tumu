@@ -45,8 +45,14 @@ fn session(n: u64) -> tumu::TermnixSessionId {
     tumu::TermnixSessionId::new(std::num::NonZeroU64::new(n).expect("non-zero"))
 }
 
+/// Builds a `rows`x`cols` state stacked *horizontally*, with `sheets` sheets.
+///
+/// Horizontal because the click tests below name columns: at 24x80 two sheets
+/// split the columns 40/40. The axis is a setting now, so it is asked for here
+/// rather than implied by the size.
 fn state_with(rows: usize, cols: usize, sheets: usize) -> tumu::State {
-    let mut state = tumu::State::new(size(rows, cols));
+    let mut state =
+        tumu::State::new(size(rows, cols)).with_orientation(tumu::Orientation::Horizontal);
     // A resize over an empty stack spawns the first sheet; pushing the rest
     // through the same event keeps the test off the internal push.
     state.update(tumu::Event::Resize(size(rows, cols)));
@@ -271,6 +277,58 @@ fn rotating_a_single_sheet_does_nothing() {
 
     assert!(actions.is_empty());
     assert_eq!(state.stack.len(), 1);
+}
+
+#[test]
+fn the_rotate_layout_command_flips_the_axis_and_resizes() {
+    let mut state = state_with(24, 80, 1);
+    state.stack.attach_session(0, session(1));
+    assert_eq!(state.orientation(), tumu::Orientation::Horizontal);
+
+    let actions = run_command(&mut state, 'r');
+
+    assert_eq!(state.orientation(), tumu::Orientation::Vertical);
+    // The region's shape changed, so every session is resized to it. The action
+    // names the whole sheet region; the edge is what subtracts the border.
+    assert_eq!(
+        actions,
+        vec![tumu::Action::ResizeSession {
+            index: 0,
+            size: termnix::Size {
+                rows: std::num::NonZeroU16::new(24).expect("non-zero"),
+                cols: std::num::NonZeroU16::new(80).expect("non-zero"),
+            },
+        }]
+    );
+}
+
+#[test]
+fn rotating_the_layout_is_its_own_inverse() {
+    let mut state = state_with(24, 80, 2);
+    let before = state.regions();
+
+    run_command(&mut state, 'r');
+    run_command(&mut state, 'r');
+
+    assert_eq!(state.orientation(), tumu::Orientation::Horizontal);
+    assert_eq!(state.regions(), before, "two flips restore the layout");
+}
+
+#[test]
+fn a_resize_keeps_the_axis() {
+    // The shape no longer decides: a resize re-lays the stack out along the axis
+    // it already has, which is the behaviour that replaced the auto-flip.
+    let mut state = state_with(24, 80, 2);
+    assert_eq!(state.orientation(), tumu::Orientation::Horizontal);
+
+    state.update(tumu::Event::Resize(size(80, 24)));
+
+    assert_eq!(state.orientation(), tumu::Orientation::Horizontal);
+    // And the split still runs down the columns of the *narrow* terminal: 24
+    // columns halve into 12 each, and each sheet still spans all 80 rows.
+    let regions = state.regions();
+    assert_eq!(regions[0].size.cols, 12);
+    assert_eq!(regions[0].size.rows, 80);
 }
 
 #[test]
@@ -779,13 +837,19 @@ fn only_a_left_press_moves_focus() {
 
 #[test]
 fn clicking_a_stacked_sheet_uses_the_derived_layout() {
-    // A tall terminal stacks vertically, so the split runs down the rows.
-    let mut state = state_with(40, 30, 2);
+    // A vertical stack, so the split runs down the rows: the top sheet owns the
+    // upper half, the sheet below the lower half.
+    let mut state = tumu::State::new(size(40, 30)).with_orientation(tumu::Orientation::Vertical);
+    state.update(tumu::Event::Resize(size(40, 30)));
+    for _ in 1..2 {
+        state.update(tumu::Event::Key(prefix()));
+        state.update(tumu::Event::Key(ch('n')));
+    }
     let top = state.stack.sheets()[0].0;
     let bottom = state.stack.sheets()[1].0;
 
-    // The border is the top sheet's first row, and the row below it is already
-    // its content; the bottom half belongs to the sheet below.
+    // A click in the lower half lands on the sheet below; one in the upper half
+    // lands on the top sheet.
     state.update(tumu::Event::Mouse(click(30, 5)));
     assert_eq!(state.focused, Some(bottom));
 

@@ -109,6 +109,11 @@ pub const BINDINGS: &[Binding] = &[
         label: "rotate to bottom",
     },
     Binding {
+        key: chord('r'),
+        command: Command::RotateOrientation,
+        label: "rotate layout",
+    },
+    Binding {
         key: chord('z'),
         command: Command::ToggleFullScreen,
         label: "full screen",
