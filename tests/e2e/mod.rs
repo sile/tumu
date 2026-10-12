@@ -145,8 +145,16 @@ impl TumuHarness {
 
     /// Sends the prefix chord (`C-q`).
     pub fn send_prefix(&mut self) {
+        self.send_prefix_char('q');
+    }
+
+    /// Sends the prefix chord for character `c` (`Ctrl` plus `c`).
+    ///
+    /// The prefix is a setting, so a test that launches tumu with `--prefix`
+    /// sends that character; the default `send_prefix` is this with `q`.
+    pub fn send_prefix_char(&mut self, c: char) {
         self.send_key(termnix::KeyEvent {
-            code: termnix::KeyCode::Char('q'),
+            code: termnix::KeyCode::Char(c),
             modifiers: termnix::Modifiers::new().ctrl(),
         });
     }

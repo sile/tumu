@@ -43,6 +43,21 @@ fn main() -> noargs::Result<()> {
         .take(&mut args)
         .then(|a| a.value().parse::<usize>())?;
 
+    // The prefix is `Ctrl` plus one character, and only the character is a
+    // setting -- see `tumu::prefix_key`. The flag, the environment, and the
+    // built-in default come from this one declaration, in the same precedence
+    // as `--scrollback`. The default is the library's own constant spelled out
+    // as a literal because `noargs` takes a `&'static str`; it must stay equal
+    // to `tumu::DEFAULT_PREFIX_CHAR`.
+    let prefix_char: char = noargs::opt("prefix")
+        .short('p')
+        .ty("CHAR")
+        .env("TUMU_PREFIX")
+        .default("q")
+        .doc("Character of the prefix key (Ctrl is fixed; e.g. `o` for C-o)")
+        .take(&mut args)
+        .then(|a| single_char(a.value()))?;
+
     if let Some(help) = args.finish()? {
         print!("{help}");
         return Ok(());
@@ -59,13 +74,8 @@ fn main() -> noargs::Result<()> {
     let shell = shell_command();
     let editor = editor_command();
     let editor_dir = editor_dir();
-    match app::App::new(
-        tumu::State::new(seed),
-        shell,
-        editor,
-        scrollback,
-        editor_dir,
-    ) {
+    let state = tumu::State::new(seed).with_prefix_char(prefix_char);
+    match app::App::new(state, shell, editor, scrollback, editor_dir) {
         Ok(mut app) => app.run()?,
         Err(err) => {
             eprintln!("tumu: {err}");
@@ -73,6 +83,21 @@ fn main() -> noargs::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Parses `text` as exactly one character.
+///
+/// The prefix setting is one character and nothing else: the `Ctrl` that goes
+/// with it is fixed, so a value like `C-o` or `Escape` is not accepted -- it is
+/// the character alone (`o`). Anything else is a parse error rather than a
+/// silently ignored value, so a mistyped `--prefix` is reported instead of
+/// leaving the built-in default in place.
+fn single_char(text: &str) -> Result<char, String> {
+    let mut chars = text.chars();
+    match (chars.next(), chars.next()) {
+        (Some(c), None) => Ok(c),
+        _ => Err(format!("expected a single character, got `{text}`")),
+    }
 }
 
 /// Builds the recipe for the external editor `prefix l` opens in a new sheet.

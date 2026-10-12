@@ -131,6 +131,31 @@ fn the_menu_is_not_laid_out_when_the_screen_is_too_small() {
 }
 
 #[test]
+fn the_send_prefix_row_shows_the_configured_prefix() {
+    // The row's key is whatever prefix the layout is built with, so a menu
+    // built for `C-o` says so and not `C-q`.
+    let layout = tumu::menu_layout(size(40, 80), "C-o").expect("the menu fits 40x80");
+
+    let last = layout.rows.last().expect("a last row");
+    assert_eq!(last.key, "C-o");
+    assert_eq!(last.label, tumu::SEND_PREFIX_LABEL);
+}
+
+#[test]
+fn a_longer_prefix_key_widens_the_key_column() {
+    // Two characters instead of three would make the column narrower, so the
+    // width is not a constant: it follows the key the layout is given.
+    let short = tumu::menu_layout(size(40, 80), "C-o").expect("the menu fits 40x80");
+    let long = tumu::menu_layout(size(40, 80), "C-M-o").expect("the menu fits 40x80");
+
+    assert!(
+        long.key_width > short.key_width,
+        "a longer key widens its column"
+    );
+    assert!(long.region.size.cols > short.region.size.cols);
+}
+
+#[test]
 fn the_row_commands_are_every_binding_exactly_once() {
     let layout = tumu::menu_layout(size(40, 80), PREFIX).expect("the menu fits 40x80");
 

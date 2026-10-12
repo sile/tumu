@@ -16,6 +16,7 @@ tumu
   - Mouse: click a sheet to focus it
   - tmux like copy-mode (PoC)
   - Bounded scrollback, set by `--scrollback` or `$TUMU_SCROLLBACK`
+  - Prefix key character, set by `--prefix` or `$TUMU_PREFIX`
 
 Stacked sheets
 --------------
@@ -56,7 +57,7 @@ $            |[C |   s2    |
   - odds rate can be changes. but the sheet sizes are calculated automatically to make it easy to support display rotation
 - a sheet can be swaped to the top, or, move to the stop
 - support full screen mode (like tmux does)
-- c-o is the prefix for tumu commands
+- a prefix chord starts tumu commands (see `Keys` below)
 
 Sheet border
 ------------
@@ -91,11 +92,23 @@ is aimed at is visible in the frame alone.
 Keys
 ----
 
-The prefix is a latch, in the tmux style: press it, then one more key.
+The prefix is a latch, in the tmux style: press it, then one more key. The
+prefix is `Ctrl` plus a character; the `Ctrl` is fixed and only the character is
+a setting:
 
-> The prefix is `c-q` while tumu is under development, because `c-o` is also
-tmux's own prefix. It returns to `c-o` later; the key is written in one place
-(`src/input.rs`).
+- `--prefix CHAR` (or `-p CHAR`)
+- `$TUMU_PREFIX`
+
+The default is `C-q`. `c-o` is the prefix tumu aims at, but `c-o` is also tmux's
+own prefix, so the default waits until nested use is a non-issue -- set `c-o`
+now with `--prefix o`. The flag wins over the environment, the environment over
+the default, exactly as for `--scrollback`. A value that is not a single
+character (for example `--prefix C-o`) is an error rather than a silent
+fallback: the `Ctrl` is fixed, so the value is the character alone (`o`).
+
+Because the prefix is `Ctrl+<char>` and every chord is an unmodified `<char>`,
+the two never collide: any character may be the prefix, even one a chord uses,
+and the setting needs no check against the binding table.
 
 - `prefix n` -- new sheet on top
 - `prefix x` -- close the focused sheet

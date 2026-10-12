@@ -44,6 +44,16 @@ pub struct State {
     /// [`handle_key`](State::handle_key) for the rule.
     pub prefix: bool,
 
+    /// The character the prefix key carries, `Ctrl` fixed.
+    ///
+    /// Only the character is configurable -- see
+    /// [`DEFAULT_PREFIX_CHAR`](crate::DEFAULT_PREFIX_CHAR) and
+    /// [`prefix_key`](crate::prefix_key) -- so the key that arms the latch, the
+    /// label on the border, and the menu's send-prefix row all read it from
+    /// here and cannot disagree. It also means a test can run a state with any
+    /// prefix without touching a global.
+    pub prefix_char: char,
+
     /// Whether the prefix menu is shown.
     ///
     /// Like full screen, it is a *view*: it changes no sheet's region, no
@@ -84,11 +94,24 @@ impl State {
             stack: Stack::new(),
             size,
             prefix: false,
+            prefix_char: crate::input::DEFAULT_PREFIX_CHAR,
             menu: false,
             full_screen: false,
             focused: None,
             exit: false,
         }
+    }
+
+    /// Sets the character the prefix key carries and returns the state.
+    ///
+    /// The prefix is `Ctrl` plus this character; the `Ctrl` is fixed, so the
+    /// setting is one character and nothing else. It is set once, from what the
+    /// edge read off the command line and the environment -- see the binary's
+    /// `main` -- so the latch, the border label, and the menu's send-prefix row
+    /// all agree on the key the user actually chose.
+    pub fn with_prefix_char(mut self, c: char) -> Self {
+        self.prefix_char = c;
+        self
     }
 
     /// Returns the axis the stack is laid out along at the current size.
@@ -112,7 +135,7 @@ impl State {
     /// lands on a command exactly when the row the renderer drew for that
     /// command was clicked.
     pub fn menu_layout(&self) -> Option<crate::MenuLayout> {
-        crate::menu_layout(self.size, &crate::input::prefix_key_text())
+        crate::menu_layout(self.size, &crate::input::prefix_key_text(self.prefix_char))
     }
 
     /// Returns the index of the focused sheet, or `None` when there is none.
@@ -285,7 +308,7 @@ impl State {
     /// when the stack is empty, rather than sent to nowhere.
     fn handle_key(&mut self, key: tuinix::KeyInput) -> Vec<Action> {
         if !self.prefix {
-            if crate::input::is_prefix(key) {
+            if crate::input::is_prefix(self.prefix_char, key) {
                 self.prefix = true;
                 // Arming the prefix also opens the menu, so the chords are
                 // visible while one is being chosen, not just known by heart.
@@ -303,7 +326,7 @@ impl State {
         // face of that one key.
         self.prefix = false;
         self.menu = false;
-        if crate::input::is_prefix(key) {
+        if crate::input::is_prefix(self.prefix_char, key) {
             return self.send_key(key);
         }
         match crate::input::resolve_command(key) {

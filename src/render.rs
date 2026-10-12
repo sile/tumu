@@ -226,7 +226,13 @@ pub fn frame(state: &State, contents: &SheetGrids) -> tuinix::Frame {
         if region.size.rows == 0 || region.size.cols == 0 {
             continue;
         }
-        let mut sheet_frame = sheet_frame(sheet, region.size, focused == Some(index), orientation);
+        let mut sheet_frame = sheet_frame(
+            sheet,
+            region.size,
+            focused == Some(index),
+            orientation,
+            state.prefix_char,
+        );
         if let Some(grid) = contents.grid(index) {
             let mut content = tuinix::Frame::new(sheet_content_size(region.size, orientation));
             draw_sheet_grid(&mut content, grid);
@@ -269,12 +275,13 @@ const BORDER_RULE: char = '─';
 /// sheet shows it; every other sheet's border starts straight into its title,
 /// which is what makes the sheet under the keyboard obvious at a glance.
 ///
-/// The key text is derived from the prefix ([`prefix_key_text`]), not written
-/// here again, so restoring the prefix to `C-o` changes this label with it.
+/// The key text is derived from the configured prefix character
+/// ([`prefix_key_text`]), not written here again, so a `--prefix o` shows `C-o`
+/// on the label too.
 ///
 /// [`prefix_key_text`]: crate::input::prefix_key_text
-fn border_label() -> String {
-    format!("[{} ...]", crate::input::prefix_key_text())
+fn border_label(prefix_char: char) -> String {
+    format!("[{} ...]", crate::input::prefix_key_text(prefix_char))
 }
 
 /// Draws one sheet's border into a fresh frame of size `size`.
@@ -307,6 +314,7 @@ pub fn sheet_frame(
     size: tuinix::Size,
     focused: bool,
     orientation: crate::Orientation,
+    prefix_char: char,
 ) -> tuinix::Frame {
     // The line, corner to edge, as the text it reads. A separator follows the
     // corner and the label only when something comes after them, so an untitled
@@ -315,7 +323,7 @@ pub fn sheet_frame(
     line.push(BORDER_CORNER);
     if focused {
         line.push(' ');
-        line.push_str(&border_label());
+        line.push_str(&border_label(prefix_char));
         line.push(' ');
     }
     if !sheet.title.is_empty() {

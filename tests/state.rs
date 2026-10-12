@@ -27,6 +27,15 @@ fn ctrl(c: char) -> KeyInput {
     key(true, KeyCode::Char(c))
 }
 
+/// The default prefix key, `C-q`.
+///
+/// The prefix is a setting now, so there is no one key to name; the tests that
+/// exercise the latch use the built-in default and the helper keeps them off
+/// the character's spelling.
+fn prefix() -> KeyInput {
+    tumu::prefix_key(tumu::DEFAULT_PREFIX_CHAR)
+}
+
 /// Builds a session id from a plain number, for tests that only need an id.
 ///
 /// A real id is a `NonZeroU64`, which is what makes "no session" unrepresentable
@@ -42,9 +51,16 @@ fn state_with(rows: usize, cols: usize, sheets: usize) -> tumu::State {
     // through the same event keeps the test off the internal push.
     state.update(tumu::Event::Resize(size(rows, cols)));
     for _ in 1..sheets {
-        state.update(tumu::Event::Key(tumu::PREFIX));
+        state.update(tumu::Event::Key(prefix()));
         state.update(tumu::Event::Key(ch('n')));
     }
+    state
+}
+
+/// A one-sheet state whose prefix is `Ctrl+c` rather than the default.
+fn state_with_prefix_char(c: char) -> tumu::State {
+    let mut state = tumu::State::new(size(24, 80)).with_prefix_char(c);
+    state.update(tumu::Event::Resize(size(24, 80)));
     state
 }
 
@@ -52,7 +68,7 @@ fn state_with(rows: usize, cols: usize, sheets: usize) -> tumu::State {
 fn the_prefix_arms_the_latch_and_reports_it() {
     let mut state = state_with(24, 80, 1);
 
-    let actions = state.update(tumu::Event::Key(tumu::PREFIX));
+    let actions = state.update(tumu::Event::Key(prefix()));
 
     assert_eq!(actions, vec![tumu::Action::PrefixPending]);
     assert!(state.prefix);
@@ -70,10 +86,54 @@ fn only_the_exact_prefix_key_arms_the_latch() {
 }
 
 #[test]
-fn the_prefix_is_the_configured_chord() {
-    // The one constant the whole prefix hangs on; the test pins it so the
-    // `c-q` -> `c-o` change later is a deliberate edit.
-    assert_eq!(tumu::PREFIX, ctrl('q'));
+fn the_default_prefix_is_ctrl_q() {
+    // The built-in default; the test pins it so changing it is a deliberate
+    // edit. It is only the default -- `--prefix` overrides it at run time.
+    assert_eq!(prefix(), ctrl('q'));
+    assert_eq!(tumu::DEFAULT_PREFIX_CHAR, 'q');
+}
+
+#[test]
+fn the_prefix_can_be_set_to_another_character() {
+    let mut state = state_with_prefix_char('o');
+
+    // `Ctrl+o` arms the latch...
+    let actions = state.update(tumu::Event::Key(ctrl('o')));
+    assert_eq!(actions, vec![tumu::Action::PrefixPending]);
+    assert!(state.prefix);
+
+    // ...and `Ctrl+q`, the default, is now ordinary typing: it is forwarded to
+    // the focused sheet and does not arm anything.
+    let mut state = state_with_prefix_char('o');
+    let actions = state.update(tumu::Event::Key(ctrl('q')));
+    assert_eq!(actions, vec![send_to_top(ctrl('q'))]);
+    assert!(!state.prefix);
+}
+
+#[test]
+fn a_configured_prefix_still_resolves_chords() {
+    let mut state = state_with_prefix_char('o');
+
+    state.update(tumu::Event::Key(ctrl('o')));
+    let actions = state.update(tumu::Event::Key(ch('q')));
+
+    // `prefix q` quits whatever the prefix character is: the chords are the
+    // unmodified keys and the prefix only arms the latch.
+    assert_eq!(actions, vec![tumu::Action::Exit]);
+    assert!(state.exit);
+}
+
+#[test]
+fn the_prefix_character_does_not_shadow_a_chord() {
+    // With the prefix on `q`, the latch and the quit chord share a character;
+    // they are still different keys, because the prefix is `Ctrl+q` and the
+    // chord is `q`. This is the namespace the two live in.
+    let mut state = state_with_prefix_char('q');
+
+    state.update(tumu::Event::Key(ctrl('q')));
+    let actions = state.update(tumu::Event::Key(ch('q')));
+
+    assert_eq!(actions, vec![tumu::Action::Exit]);
 }
 
 #[test]
@@ -89,18 +149,18 @@ fn an_unlatched_key_is_forwarded_to_the_focused_sheet() {
 #[test]
 fn a_bare_prefix_is_sent_to_the_focused_sheet() {
     let mut state = state_with(24, 80, 1);
-    state.update(tumu::Event::Key(tumu::PREFIX));
+    state.update(tumu::Event::Key(prefix()));
 
-    let actions = state.update(tumu::Event::Key(tumu::PREFIX));
+    let actions = state.update(tumu::Event::Key(prefix()));
 
-    assert_eq!(actions, vec![send_to_top(tumu::PREFIX)]);
+    assert_eq!(actions, vec![send_to_top(prefix())]);
     assert!(!state.prefix);
 }
 
 #[test]
 fn an_unbound_latched_key_does_nothing() {
     let mut state = state_with(24, 80, 1);
-    state.update(tumu::Event::Key(tumu::PREFIX));
+    state.update(tumu::Event::Key(prefix()));
 
     // `w` is bound to nothing (`z` is the full-screen toggle now, so the test
     // needs a key that stays free).
@@ -113,7 +173,7 @@ fn an_unbound_latched_key_does_nothing() {
 #[test]
 fn an_alt_modified_latched_key_is_unbound() {
     let mut state = state_with(24, 80, 1);
-    state.update(tumu::Event::Key(tumu::PREFIX));
+    state.update(tumu::Event::Key(prefix()));
 
     let actions = state.update(tumu::Event::Key(KeyInput {
         ctrl: false,
@@ -128,7 +188,7 @@ fn an_alt_modified_latched_key_is_unbound() {
 #[test]
 fn the_new_sheet_command_stacks_a_sheet_on_top() {
     let mut state = state_with(24, 80, 1);
-    state.update(tumu::Event::Key(tumu::PREFIX));
+    state.update(tumu::Event::Key(prefix()));
 
     let actions = state.update(tumu::Event::Key(ch('n')));
 
@@ -152,7 +212,7 @@ fn the_close_sheet_command_drops_the_focused_sheet() {
     // to name. A sheet whose session has not been spawned yet closes silently.
     let top = session(7);
     state.stack.attach_session(0, top);
-    state.update(tumu::Event::Key(tumu::PREFIX));
+    state.update(tumu::Event::Key(prefix()));
 
     let actions = state.update(tumu::Event::Key(ch('x')));
 
@@ -175,7 +235,7 @@ fn closing_a_sheet_names_the_session_it_closed_not_the_one_that_shifted_up() {
     let below = session(2);
     state.stack.attach_session(0, top);
     state.stack.attach_session(1, below);
-    state.update(tumu::Event::Key(tumu::PREFIX));
+    state.update(tumu::Event::Key(prefix()));
 
     let actions = state.update(tumu::Event::Key(ch('x')));
 
@@ -195,7 +255,7 @@ fn closing_a_sheet_names_the_session_it_closed_not_the_one_that_shifted_up() {
 fn the_rotate_command_moves_the_focused_sheet_to_the_bottom() {
     let mut state = state_with(24, 80, 3);
     let top = state.stack.sheets()[0].0;
-    state.update(tumu::Event::Key(tumu::PREFIX));
+    state.update(tumu::Event::Key(prefix()));
 
     state.update(tumu::Event::Key(ch('o')));
 
@@ -205,7 +265,7 @@ fn the_rotate_command_moves_the_focused_sheet_to_the_bottom() {
 #[test]
 fn rotating_a_single_sheet_does_nothing() {
     let mut state = state_with(24, 80, 1);
-    state.update(tumu::Event::Key(tumu::PREFIX));
+    state.update(tumu::Event::Key(prefix()));
 
     let actions = state.update(tumu::Event::Key(ch('o')));
 
@@ -216,7 +276,7 @@ fn rotating_a_single_sheet_does_nothing() {
 #[test]
 fn the_quit_command_sets_exit_and_returns_it() {
     let mut state = state_with(24, 80, 1);
-    state.update(tumu::Event::Key(tumu::PREFIX));
+    state.update(tumu::Event::Key(prefix()));
 
     let actions = state.update(tumu::Event::Key(ch('q')));
 
@@ -387,7 +447,7 @@ fn a_forwarded_key_is_dropped_when_there_is_no_sheet() {
 
 /// Drives a latched command: arm the prefix, then press `key`.
 fn run_command(state: &mut tumu::State, key: char) -> Vec<tumu::Action> {
-    state.update(tumu::Event::Key(tumu::PREFIX));
+    state.update(tumu::Event::Key(prefix()));
     state.update(tumu::Event::Key(ch(key)))
 }
 
@@ -738,7 +798,7 @@ fn arming_the_prefix_opens_the_menu_and_the_next_key_closes_it() {
     let mut state = state_with(24, 80, 2);
     assert!(!state.menu, "the menu starts closed");
 
-    state.update(tumu::Event::Key(tumu::PREFIX));
+    state.update(tumu::Event::Key(prefix()));
     assert!(state.menu, "the prefix opens the menu");
 
     // A bound key runs its command and closes the menu.
@@ -750,7 +810,7 @@ fn arming_the_prefix_opens_the_menu_and_the_next_key_closes_it() {
 #[test]
 fn an_unbound_key_closes_the_menu_and_does_nothing_else() {
     let mut state = state_with(24, 80, 1);
-    state.update(tumu::Event::Key(tumu::PREFIX));
+    state.update(tumu::Event::Key(prefix()));
     assert!(state.menu);
 
     let actions = state.update(tumu::Event::Key(ch('Z')));
@@ -763,11 +823,11 @@ fn an_unbound_key_closes_the_menu_and_does_nothing_else() {
 #[test]
 fn the_prefix_again_sends_the_prefix_and_closes_the_menu() {
     let mut state = state_with(24, 80, 1);
-    state.update(tumu::Event::Key(tumu::PREFIX));
+    state.update(tumu::Event::Key(prefix()));
 
-    let actions = state.update(tumu::Event::Key(tumu::PREFIX));
+    let actions = state.update(tumu::Event::Key(prefix()));
 
-    assert_eq!(actions, vec![send_to_top(tumu::PREFIX)]);
+    assert_eq!(actions, vec![send_to_top(prefix())]);
     assert!(!state.menu);
 }
 
@@ -776,7 +836,7 @@ fn clicking_a_menu_row_runs_its_command_and_closes_the_menu() {
     let mut state = state_with(40, 80, 2);
     // The focused sheet needs a session for closing it to name one.
     state.stack.attach_session(0, session(1));
-    state.update(tumu::Event::Key(tumu::PREFIX));
+    state.update(tumu::Event::Key(prefix()));
     let layout = state.menu_layout().expect("the menu fits 40x80");
 
     // Click the row that closes a sheet.
@@ -803,7 +863,7 @@ fn clicking_a_menu_row_runs_its_command_and_closes_the_menu() {
 #[test]
 fn clicking_the_menu_border_dismisses_it() {
     let mut state = state_with(40, 80, 2);
-    state.update(tumu::Event::Key(tumu::PREFIX));
+    state.update(tumu::Event::Key(prefix()));
     let layout = state.menu_layout().expect("the menu fits 40x80");
     let corner = layout.region.position;
 
@@ -854,7 +914,7 @@ fn a_screen_too_small_for_the_box_shows_no_menu() {
     // a menu that was not drawn.
     let mut state = state_with(40, 4, 1);
 
-    state.update(tumu::Event::Key(tumu::PREFIX));
+    state.update(tumu::Event::Key(prefix()));
 
     assert!(state.prefix, "the latch still arms");
     assert!(!state.menu, "but there is no menu to show");

@@ -210,6 +210,25 @@ fn a_sheet_with_no_contents_shows_only_its_border() {
 }
 
 #[test]
+fn the_border_label_follows_the_configured_prefix_character() {
+    // The label names the key that is actually in force, so a state built with
+    // another prefix character must show that character and not the default.
+    let mut state = tumu::State::new(size(24, 40)).with_prefix_char('o');
+    state.update(tumu::Event::Resize(size(24, 40)));
+
+    let frame = tumu::frame(&state, &no_grids());
+
+    assert!(
+        row_text(&frame, 23).starts_with("└ [C-o ...]"),
+        "the label names the configured prefix"
+    );
+    assert!(
+        !row_text(&frame, 23).contains("C-q"),
+        "the default does not appear once the prefix is set"
+    );
+}
+
+#[test]
 fn contents_are_painted_to_the_left_of_the_border_and_clipped_at_the_sheet_edge() {
     use termnix::{Cell, Style};
 

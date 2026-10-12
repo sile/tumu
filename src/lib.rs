@@ -42,7 +42,10 @@ pub use geometry::{
     terminal_size_to_cell_size,
 };
 pub use id::{SheetId, TermnixSessionId};
-pub use input::{BINDINGS, Binding, PREFIX, SCROLLBACK_FILE_PREFIX};
+pub use input::{
+    BINDINGS, Binding, DEFAULT_PREFIX_CHAR, SCROLLBACK_FILE_PREFIX, is_prefix, prefix_key,
+    prefix_key_text,
+};
 pub use menu::{MenuLayout, MenuRow, SEND_PREFIX_LABEL, chord_text, menu_layout};
 pub use orientation::{
     DEFAULT_CELL_ASPECT, Orientation, orientation, orientation_with_default_factor,
