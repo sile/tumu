@@ -1,6 +1,6 @@
 //! The multiplexer state and its pure handlers.
 
-use crate::{Action, Command, Event, Program, SheetId, Stack};
+use crate::{Action, Command, Event, Program, SheetId, Stack, TermnixSessionId};
 
 /// The index of the top of the stack: where a new sheet is pushed.
 ///
@@ -254,6 +254,21 @@ impl State {
             .sheets()
             .iter()
             .position(|(id, _)| *id == focused)
+    }
+
+    /// Returns the session held by the focused sheet, or `None` when there is
+    /// no focused sheet or it has no session yet.
+    ///
+    /// This is what a new sheet inherits its directory from. It is a session
+    /// and not an index because the sheet that was focused moves when the new
+    /// sheet is pushed on top: the caller wants to name the *source* of the
+    /// directory in a way that survives that push, and a session does.
+    fn focused_session(&self) -> Option<TermnixSessionId> {
+        let focused = self.focused?;
+        self.stack
+            .sheets()
+            .iter()
+            .find_map(|(id, sheet)| (*id == focused).then_some(sheet.session).flatten())
     }
 
     /// Applies `event` and returns the actions the edge should carry out.
@@ -555,11 +570,17 @@ impl State {
     /// is also why the tool sheets need no new action: an external command is
     /// spawned exactly as the shell is, by [`SpawnSession`](Action::SpawnSession).
     fn handle_new_sheet(&mut self, program: Program) -> Vec<Action> {
+        // The session the focused sheet holds is where the new one should
+        // start: a child opened from a shell that has `cd`-ed belongs in the
+        // same directory. It is read before the push, because the push moves
+        // the focused sheet off the top; a session names it across the move.
+        let cwd_from = self.focused_session();
         let id = self.stack.push_top();
         self.focused = Some(id);
         let mut actions = vec![Action::SpawnSession {
             index: STACK_TOP,
             program,
+            cwd_from,
         }];
         actions.extend(self.resize_actions());
         actions
@@ -761,6 +782,10 @@ impl State {
         else {
             return Vec::new();
         };
+        // The editor opens where the sheet it reads is, so a scrollback taken
+        // from a `cd`-ed shell is opened in the same directory. The focused
+        // sheet's session is read before the push, like every new sheet's.
+        let cwd_from = self.focused_session();
         let id = self.stack.push_top();
         self.focused = Some(id);
         let name = format!("{}-{id}.txt", crate::input::SCROLLBACK_FILE_PREFIX);
@@ -772,6 +797,7 @@ impl State {
             Action::SpawnSession {
                 index: STACK_TOP,
                 program: Program::Editor { name },
+                cwd_from,
             },
         ]
         .into_iter()
@@ -963,6 +989,9 @@ impl State {
             actions.push(Action::SpawnSession {
                 index: STACK_TOP,
                 program: Program::Shell,
+                // The first sheet of the run has nothing to inherit from: it
+                // starts in the directory tumu itself was launched in.
+                cwd_from: None,
             });
         }
 

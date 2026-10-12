@@ -142,8 +142,10 @@ the editor sheet `prefix l` opens.
 
 The tool is a child, not a program tumu knows how to speak to: no pattern or
 revision is passed in, so the tool starts on its own prompt and the search or the
-diff is chosen inside it. Where it looks is where the sheet is started, so it
-reads the repository tumu itself was started in.
+diff is chosen inside it. Where it looks is where the sheet is started -- the
+focused sheet's directory, like any new sheet (see
+[Where a new sheet starts](#where-a-new-sheet-starts)) -- so opening it from a
+shell that has `cd`-ed into a repository reads that repository.
 
 The program is configurable, so a user (or a test) can point the chords at
 another tool without a rebuild:
@@ -314,6 +316,27 @@ the new space from history. This is the tmux behavior of redrawing from
 scrollback, without re-wrapping: a line keeps the width it had when it was
 pushed off, so a row that was wider or narrower than the region today is clipped
 or padded rather than re-flowed.
+
+Where a new sheet starts
+------------------------
+
+A new sheet starts in the directory of the sheet that was focused when it was
+asked for, so a shell that has `cd`-ed into a project opens the next sheet --
+the shell, a tool sheet, the editor -- where the user already is, not where tumu
+was launched.
+
+The directory lives in the focused child's own process, not in tumu, so tumu
+reads it out of the running child: the child is a session leader, so its pid is
+its process group id, and `/proc/<pid>/cwd` is where it stands. Nothing is asked
+of the child, so a shell needs no cooperation for this and a program that does
+not report its directory still works.
+
+This is best-effort. The first sheet of a run has nothing to inherit from, so it
+starts where tumu was launched, and every failure to read the directory -- no
+`/proc`, a child already gone, a child that changed directory between the read
+and the spawn -- falls back to the same place rather than refusing to open the
+sheet. A sheet that starts one directory off is a smaller surprise than one that
+will not open.
 
 Copy mode (PoC)
 ---------------

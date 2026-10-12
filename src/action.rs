@@ -61,6 +61,27 @@ pub enum Action {
 
         /// What to run in it.
         program: Program,
+
+        /// The session whose current directory the new child should start in,
+        /// or `None` for the edge's own working directory.
+        ///
+        /// A new sheet should open where the user already is, so a child
+        /// started from a shell that has `cd`-ed begins in the same place
+        /// rather than in whatever directory tumu itself was launched from.
+        /// The core names *which* session to inherit from -- the one the
+        /// focused sheet held when the new sheet was asked for -- because the
+        /// core is what resolves focus. A session, not a sheet index, is named:
+        /// the sheet that was focused moves when the new sheet is pushed on
+        /// top, so an index captured before the push no longer names it, while
+        /// a session outlives every reordering. The directory itself is the
+        /// edge's to read: it reads it out of the running child, which only the
+        /// edge holds.
+        ///
+        /// `None` is the honest answer when there is no session to inherit
+        /// from (the first sheet of the run) or when the source sheet has no
+        /// session yet; the edge then leaves the child in its own working
+        /// directory, which is exactly where tumu was started.
+        cwd_from: Option<crate::TermnixSessionId>,
     },
 
     /// Write the scrollback of `session` to a file and open it in an editor in

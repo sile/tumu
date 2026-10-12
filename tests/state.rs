@@ -129,7 +129,10 @@ fn a_configured_prefix_still_resolves_chords() {
             actions.first(),
             Some(&tumu::Action::SpawnSession {
                 index: 0,
-                program: tumu::Program::Shell
+                program: tumu::Program::Shell,
+                // The existing sheet has no session in a unit test, so there is
+                // nothing to inherit a directory from.
+                cwd_from: None
             })
         ),
         "the chord resolved through the configured prefix, got {actions:?}"
@@ -218,11 +221,62 @@ fn the_new_sheet_command_stacks_a_sheet_on_top() {
             actions.first(),
             Some(&tumu::Action::SpawnSession {
                 index: 0,
-                program: tumu::Program::Shell
+                program: tumu::Program::Shell,
+                // No session is attached to the existing sheet in a unit test,
+                // so it has no directory to inherit.
+                cwd_from: None
             })
         ),
         "the first action spawns a shell in the new top sheet, got {actions:?}"
     );
+}
+
+#[test]
+fn a_new_sheet_inherits_the_focused_sheets_session() {
+    // The sheet that is focused when the new one is asked for is where the new
+    // child starts. The session is named, not the index: the push moves the
+    // focused sheet off the top, so an index taken before it would name the new
+    // sheet by the time the edge spawned anything.
+    let mut state = state_with(24, 80, 1);
+    let source = session(7);
+    state.stack.attach_session(0, source);
+
+    let actions = run_command(&mut state, 'c');
+
+    let spawn = actions
+        .iter()
+        .find_map(|action| match action {
+            tumu::Action::SpawnSession { cwd_from, .. } => Some(cwd_from),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("a new sheet spawns a session, got {actions:?}"));
+    assert_eq!(
+        *spawn,
+        Some(source),
+        "the new sheet inherits the focused sheet's session, got {actions:?}"
+    );
+}
+
+#[test]
+fn a_new_sheet_with_nothing_focused_has_nothing_to_inherit() {
+    // With no sheet focused there is no session to start from, and the new
+    // child keeps the edge's own working directory.
+    let mut state = tumu::State::new(size(24, 80));
+    state.update(tumu::Event::Resize(size(24, 80)));
+    // The resize spawned the first sheet but no session is attached in a unit
+    // test; focus is on that sheet and it holds no session.
+    assert_eq!(state.focused_index(), Some(0));
+
+    let actions = run_command(&mut state, 'c');
+
+    let spawn = actions
+        .iter()
+        .find_map(|action| match action {
+            tumu::Action::SpawnSession { cwd_from, .. } => Some(cwd_from),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("a new sheet spawns a session, got {actions:?}"));
+    assert_eq!(*spawn, None, "nothing to inherit, got {actions:?}");
 }
 
 #[test]
@@ -240,7 +294,8 @@ fn the_diff_sheet_command_runs_the_diff_browser_in_a_new_top_sheet() {
         actions.first(),
         Some(&tumu::Action::SpawnSession {
             index: 0,
-            program: tumu::Program::Diff
+            program: tumu::Program::Diff,
+            cwd_from: None
         }),
         "the first action spawns the diff browser in the new top sheet, got {actions:?}"
     );
@@ -265,7 +320,8 @@ fn the_grep_sheet_command_runs_the_grep_browser_in_a_new_top_sheet() {
         actions.first(),
         Some(&tumu::Action::SpawnSession {
             index: 0,
-            program: tumu::Program::Grep
+            program: tumu::Program::Grep,
+            cwd_from: None
         }),
         "the first action spawns the grep browser in the new top sheet, got {actions:?}"
     );
@@ -294,7 +350,8 @@ fn a_tool_sheet_can_be_opened_on_an_empty_stack() {
         actions.first(),
         Some(&tumu::Action::SpawnSession {
             index: 0,
-            program: tumu::Program::Diff
+            program: tumu::Program::Diff,
+            cwd_from: None
         }),
         "an empty stack still gets a diff sheet, got {actions:?}"
     );
@@ -745,15 +802,24 @@ fn editing_the_scrollback_adds_a_focused_editor_sheet_on_top() {
             session: source
         })
     );
-    assert!(
-        actions.iter().any(|action| matches!(
-            action,
+    // The editor opens where the sheet it reads is, so its spawn inherits the
+    // focused sheet's session -- the one the test attached above -- not a
+    // directory picked out of tumu's own launch place.
+    let spawn = actions
+        .iter()
+        .find_map(|action| match action {
             tumu::Action::SpawnSession {
                 index: 0,
-                program: tumu::Program::Editor { .. }
-            }
-        )),
-        "the editor sheet spawns the editor, got {actions:?}"
+                program: tumu::Program::Editor { .. },
+                cwd_from,
+            } => Some(cwd_from),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("the editor sheet spawns the editor, got {actions:?}"));
+    assert_eq!(
+        *spawn,
+        Some(source),
+        "the editor inherits the sheet it reads, got {actions:?}"
     );
 }
 

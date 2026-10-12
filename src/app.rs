@@ -770,8 +770,12 @@ impl App {
     fn dispatch(&mut self, actions: Vec<tumu::Action>) -> std::io::Result<()> {
         for action in actions {
             match action {
-                tumu::Action::SpawnSession { index, program } => {
-                    self.spawn_session(index, program)?;
+                tumu::Action::SpawnSession {
+                    index,
+                    program,
+                    cwd_from,
+                } => {
+                    self.spawn_session(index, program, cwd_from)?;
                 }
                 tumu::Action::ResizeSession { index, size } => {
                     self.resize_session(index, size);
@@ -801,13 +805,25 @@ impl App {
     /// [`open_editor`](App::open_editor) has just written). The two share the
     /// whole of this: a session is a session, and which child it is makes no
     /// difference to how it is sized, attached, or painted.
-    fn spawn_session(&mut self, index: usize, program: tumu::Program) -> std::io::Result<()> {
+    ///
+    /// `cwd_from` is the session whose current directory the new child should
+    /// start in, as the core resolved it (see
+    /// [`SpawnSession::cwd_from`](tumu::Action::SpawnSession)). The directory is
+    /// read here, from the running child, and kept only for the spawn: the child
+    /// owns its own location from then on and tumu never reads it again.
+    fn spawn_session(
+        &mut self,
+        index: usize,
+        program: tumu::Program,
+        cwd_from: Option<tumu::TermnixSessionId>,
+    ) -> std::io::Result<()> {
         let Some(region) = self.state.content_region_of(index) else {
             return Ok(());
         };
         let Some(size) = tumu::terminal_size_to_cell_size(region.size) else {
             return Ok(());
         };
+        let cwd = self.sheet_cwd(cwd_from);
         // The editor's file is named by the core and placed by this edge: the
         // one join that turns the name into the path the child is handed, and
         // the path the file is removed by later.
@@ -825,6 +841,9 @@ impl App {
             tumu::Program::Diff => self.diff.command(),
             tumu::Program::Grep => self.grep.command(),
         };
+        if let Some(dir) = &cwd {
+            command.current_dir(dir);
+        }
         let session = termnix::Session::new(&mut command, size)?;
         let id = tumu::TermnixSessionId::new(self.next_session_id);
         self.next_session_id = std::num::NonZeroU64::new(self.next_session_id.get() + 1)
@@ -838,6 +857,34 @@ impl App {
         self.state.stack.attach_session(index, id);
         self.dirty = true;
         Ok(())
+    }
+
+    /// Returns the current directory of the session `from`, to start a child
+    /// in.
+    ///
+    /// A new sheet should open where the user already is, and a shell that has
+    /// `cd`-ed knows that place, not tumu. The directory is read out of the
+    /// running child through its `/proc` entry: the child is a session leader,
+    /// so its pid is its process group id, and `/proc/<pid>/cwd` is a symlink to
+    /// where it stands. That read is how a multiplexer inherits a shell's
+    /// directory without asking the shell to report it, which it cannot do
+    /// without cooperation from whatever runs inside it.
+    ///
+    /// The session is named, not a sheet index: the index a sheet has when the
+    /// new sheet is asked for is not the index it has once the push that adds
+    /// the new sheet has moved it. A session outlives every reordering, so the
+    /// core hands out the one stable handle there is.
+    ///
+    /// Every failure is a silent `None`, which means "start the child where
+    /// tumu itself is": no session to inherit from (the first sheet of the
+    /// run), a session already gone, no `/proc`, or a child that changed
+    /// directory between the read and the spawn. A child that starts one
+    /// directory off is a smaller surprise than a sheet that refuses to open,
+    /// so none of these is an error.
+    fn sheet_cwd(&self, from: Option<tumu::TermnixSessionId>) -> Option<PathBuf> {
+        let session = self.sessions.get(&from?)?;
+        let pid = session.child_pid()?;
+        std::fs::read_link(format!("/proc/{pid}/cwd")).ok()
     }
 
     /// Writes the scrollback of `session` to the file an editor sheet opens.

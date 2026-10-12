@@ -8,7 +8,7 @@ description = "A terminal multiplexer with stacked sheets"
 [dependencies]
 libc = "0.2"
 noargs = "0.4"
-termnix = "0.5"
+termnix = "0.5.2"
 tuinix = "0.7"
 unicode-width = "0.2"
 
