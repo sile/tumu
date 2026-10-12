@@ -42,9 +42,10 @@ impl TumuHarness {
 
     /// Launches the `tumu` binary with `$SHELL` pinned to `shell`.
     ///
-    /// Every sheet runs `$SHELL -l`, so pointing `$SHELL` at a script makes the
-    /// sheet's output something a test can assert on, instead of whatever the
-    /// user's login shell prints.
+    /// A sheet runs `$SHELL -l` by default, so pointing `$SHELL` at a script
+    /// makes the sheet's output something a test can assert on, instead of
+    /// whatever the user's login shell prints. A test that wants the flag
+    /// instead uses [`with_args`](TumuHarness::with_args) and `--shell`.
     pub fn with_shell(rows: u16, cols: u16, shell: &str) -> Self {
         let shell = shell.to_string();
         Self::spawn(rows, cols, move |command| {

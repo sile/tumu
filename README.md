@@ -102,6 +102,27 @@ row (or column) shorter than the sheet. The one exception is the **full-screen**
 sheet (`prefix z`): it has no neighbour to be closed off from, so it draws no
 border at all and its child's grid fills the whole terminal.
 
+Shell
+-----
+
+Every sheet runs the same program: a shell, started as a login shell. Which
+program it is can be set at startup, with the flag taking precedence over the
+environment:
+
+- `--shell PATH`
+- `$SHELL`
+
+The default is `/bin/sh`, used when the flag is absent and `$SHELL` is unset or
+empty. The value is a **path**, not a short name, so the flag points tumu at a
+specific program -- a shell, or a script that stands in for one. The `-l` is
+always passed, so a program that does not understand it has to ignore it.
+
+`$SHELL` keeps its usual name rather than a `$TUMU_SHELL` twin, because a shell
+is what it names everywhere else, so there is nothing new to learn. There is no
+`prefix` command for it either: the program is fixed at startup, because every
+sheet runs it and a mid-run change would either miss the sheets already up or
+replace a shell a user is working in.
+
 Orientation
 -----------
 

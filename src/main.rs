@@ -74,6 +74,23 @@ fn main() -> noargs::Result<()> {
         .take(&mut args)
         .then(|a| orientation_name(a.value()))?;
 
+    // The program every sheet runs. It is a path, not a short name, because the
+    // point is to point tumu at a specific shell (or a script that stands in for
+    // one) rather than to pick from a list. The flag, the environment, and the
+    // built-in default come from this one declaration, in the same precedence
+    // as `--scrollback`: `--shell` beats `$SHELL`, which beats `/bin/sh`. The
+    // default is a literal because `noargs` takes a `&'static str`. `$SHELL`
+    // keeps its name -- a shell is what it names everywhere else -- so there is
+    // no `$TUMU_SHELL` to learn. An empty `$SHELL` is ignored by `noargs`, which
+    // matches the fallback tumu has always had.
+    let shell: PathBuf = noargs::opt("shell")
+        .ty("PATH")
+        .env("SHELL")
+        .default("/bin/sh")
+        .doc("Program each sheet runs (the login shell; `-l` is always passed)")
+        .take(&mut args)
+        .then(|a| a.value().parse::<PathBuf>())?;
+
     if let Some(help) = args.finish()? {
         print!("{help}");
         return Ok(());
@@ -87,7 +104,7 @@ fn main() -> noargs::Result<()> {
     // is taken over, so the seed here is only a placeholder that the first
     // resize replaces.
     let seed = tuinix::Size { rows: 24, cols: 80 };
-    let shell = shell_command();
+    let shell = shell_command(shell);
     let editor = editor_command();
     let editor_dir = editor_dir();
     let state = tumu::State::new(seed)
@@ -159,12 +176,12 @@ fn editor_dir() -> PathBuf {
 /// Builds the recipe for the shell tumu runs in every sheet: the user's login
 /// shell.
 ///
-/// `$SHELL` is preferred and falls back to `/bin/sh`, so tumu starts the same
-/// shell the user is used to. The recipe is a program and its arguments, not a
-/// live [`Command`](std::process::Command): a fresh command is built from it per
-/// spawn, because `termnix` registers child setup on the command and a command
-/// cannot be spawned twice.
-fn shell_command() -> app::ShellCommand {
-    let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into());
-    app::ShellCommand::new(PathBuf::from(shell), vec![OsString::from("-l")])
+/// The program is decided in `main` -- `--shell`, then `$SHELL`, then `/bin/sh`
+/// -- so all this adds is the `-l` that makes it a login shell and the wrapper
+/// that lets a fresh command be built per spawn. The recipe is a program and its
+/// arguments, not a live [`Command`](std::process::Command): a fresh command is
+/// built from it per spawn, because `termnix` registers child setup on the
+/// command and a command cannot be spawned twice.
+fn shell_command(program: PathBuf) -> app::ShellCommand {
+    app::ShellCommand::new(program, vec![OsString::from("-l")])
 }
