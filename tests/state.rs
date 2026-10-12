@@ -57,8 +57,7 @@ fn state_with(rows: usize, cols: usize, sheets: usize) -> tumu::State {
     // through the same event keeps the test off the internal push.
     state.update(tumu::Event::Resize(size(rows, cols)));
     for _ in 1..sheets {
-        state.update(tumu::Event::Key(prefix()));
-        state.update(tumu::Event::Key(ch('n')));
+        run_command(&mut state, 'c');
     }
     state
 }
@@ -194,9 +193,8 @@ fn an_alt_modified_latched_key_is_unbound() {
 #[test]
 fn the_new_sheet_command_stacks_a_sheet_on_top() {
     let mut state = state_with(24, 80, 1);
-    state.update(tumu::Event::Key(prefix()));
 
-    let actions = state.update(tumu::Event::Key(ch('n')));
+    let actions = run_command(&mut state, 'c');
 
     assert_eq!(state.stack.len(), 2);
     assert!(
@@ -255,6 +253,73 @@ fn closing_a_sheet_names_the_session_it_closed_not_the_one_that_shifted_up() {
         Some(below),
         "the survivor keeps its session"
     );
+}
+
+#[test]
+fn the_focus_next_command_steps_down_the_stack() {
+    let mut state = state_with(24, 80, 3);
+    // Focus is on the top sheet to start with.
+    let middle = state.stack.sheets()[1].0;
+    let bottom = state.stack.sheets()[2].0;
+
+    let actions = run_command(&mut state, 'n');
+    assert_eq!(state.focused, Some(middle), "one step lands on the middle");
+    assert!(
+        actions.is_empty(),
+        "stepping moves the focus, not the layout: nothing to resize"
+    );
+
+    run_command(&mut state, 'n');
+    assert_eq!(
+        state.focused,
+        Some(bottom),
+        "a second step lands on the bottom"
+    );
+}
+
+#[test]
+fn the_focus_previous_command_steps_up_the_stack() {
+    let mut state = state_with(24, 80, 3);
+    // Start at the bottom, so both steps go somewhere.
+    let bottom = state.stack.sheets()[2].0;
+    let middle = state.stack.sheets()[1].0;
+    let top = state.stack.sheets()[0].0;
+    state.focused = Some(bottom);
+
+    run_command(&mut state, 'p');
+    assert_eq!(state.focused, Some(middle));
+
+    run_command(&mut state, 'p');
+    assert_eq!(state.focused, Some(top));
+}
+
+#[test]
+fn a_focus_step_stops_at_the_ends_of_the_stack() {
+    // The step does not wrap: on the top sheet `p` stays there, and on the
+    // bottom `n` stays there, because a wrap would move the keyboard to a
+    // sheet the user was not stepping towards.
+    let mut state = state_with(24, 80, 3);
+    let top = state.stack.sheets()[0].0;
+    let bottom = state.stack.sheets()[2].0;
+
+    // `p` from the top is a no-op.
+    run_command(&mut state, 'p');
+    assert_eq!(state.focused, Some(top));
+
+    // Walk down to the bottom, then `n` there is a no-op.
+    state.focused = Some(bottom);
+    run_command(&mut state, 'n');
+    assert_eq!(state.focused, Some(bottom));
+}
+
+#[test]
+fn a_focus_step_on_an_empty_stack_does_nothing() {
+    let mut state = tumu::State::new(size(24, 80));
+
+    let actions = run_command(&mut state, 'n');
+
+    assert!(actions.is_empty());
+    assert_eq!(state.focused, None);
 }
 
 #[test]
@@ -698,7 +763,7 @@ fn a_new_sheet_under_full_screen_takes_the_whole_terminal() {
     let mut state = state_with(24, 80, 1);
     run_command(&mut state, 'z');
 
-    run_command(&mut state, 'n');
+    run_command(&mut state, 'c');
 
     // The new sheet is focused, so full screen follows it: one sheet on show,
     // and the other hidden.
@@ -904,10 +969,7 @@ fn clicking_a_stacked_sheet_uses_the_derived_layout() {
     // upper half, the sheet below the lower half.
     let mut state = tumu::State::new(size(40, 30)).with_orientation(tumu::Orientation::Vertical);
     state.update(tumu::Event::Resize(size(40, 30)));
-    for _ in 1..2 {
-        state.update(tumu::Event::Key(prefix()));
-        state.update(tumu::Event::Key(ch('n')));
-    }
+    run_command(&mut state, 'c');
     let top = state.stack.sheets()[0].0;
     let bottom = state.stack.sheets()[1].0;
 

@@ -148,8 +148,10 @@ Because the prefix is `Ctrl+<char>` and every chord is an unmodified `<char>`,
 the two never collide: any character may be the prefix, even one a chord uses,
 and the setting needs no check against the binding table.
 
-- `prefix n` -- new sheet on top
+- `prefix c` -- new sheet on top
 - `prefix x` -- close the focused sheet
+- `prefix p` -- move the focus up (vertical) / left (horizontal)
+- `prefix n` -- move the focus down (vertical) / right (horizontal)
 - `prefix o` -- move the focused sheet to the bottom
 - `prefix r` -- flip the stacking axis (vertical / horizontal)
 - `prefix z` -- show the focused sheet full screen, and back
@@ -163,6 +165,14 @@ The focused sheet is the sheet the commands act on and the one the keyboard is
 sent to. A new sheet goes on top and takes the focus; `prefix o` and
 `prefix x` move it to the sheet that takes the focused one's place, so the
 stack comes up under the keyboard rather than the keyboard moving away.
+
+`prefix n` and `prefix p` move the focus one place along the stack, in the
+direction the stack advances: `n` is *next* (down when the sheets run down the
+screen, right when they run across it) and `p` is *previous* (up / left). The
+step does not wrap -- at either end of the stack it does nothing -- and it moves
+only the keyboard: the stack keeps its order, so nothing is resized. `c` is
+*create* rather than the more usual `n` for a new sheet, because `n` is the step
+downwards.
 
 `prefix z` is a view, not a rearrangement: the focused sheet fills the
 terminal while the others keep their places, and clearing the flag brings the
@@ -265,13 +275,14 @@ When the prefix (default to C-q) is pressed, an overlay menu window is shown on
 the center of the terminal:
 
 ```
-   ┌────────────────┐
-   │ n    new sheet │
-   │ x    ...       │
-   | o    ...       |
-   | ...            |
-   | C-q  send prefix
-   └────────────────┘
+   ┌───────────────────┐
+   │ c    new sheet    │
+   │ x    ...          │
+   | p    ...          |
+   | n    ...          |
+   | ...               |
+   | C-q  send prefix  |
+   └───────────────────┘
 ```
 
 The menu lists every prefix chord. Its rows come from the same table the keys

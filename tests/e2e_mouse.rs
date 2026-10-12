@@ -79,7 +79,7 @@ fn clicking_a_sheet_moves_focus_to_it() {
     let mut tumu = harness("moves-focus");
     tumu.wait_for_column_text("[C-q ...]");
     tumu.send_prefix();
-    tumu.send_char('n');
+    tumu.send_char('c');
     wait_for_focus(&mut tumu, true);
 
     // Click the sheet below: it takes the focus, and the label moves with it.
@@ -92,7 +92,7 @@ fn clicking_back_returns_focus_to_the_top_sheet() {
     let mut tumu = harness("click-back");
     tumu.wait_for_column_text("[C-q ...]");
     tumu.send_prefix();
-    tumu.send_char('n');
+    tumu.send_char('c');
     wait_for_focus(&mut tumu, true);
 
     tumu.click(5, LOWER_SHEET_COL);
@@ -107,7 +107,7 @@ fn a_click_does_not_disturb_the_layout() {
     let mut tumu = harness("layout-unchanged");
     tumu.wait_for_column_text("[C-q ...]");
     tumu.send_prefix();
-    tumu.send_char('n');
+    tumu.send_char('c');
     wait_for_focus(&mut tumu, true);
 
     tumu.click(5, LOWER_SHEET_COL);
@@ -282,7 +282,7 @@ fn a_click_outside_a_mouse_tracking_child_still_moves_focus() {
     );
     tumu.wait_for_column_text("[C-q ...]");
     tumu.send_prefix();
-    tumu.send_char('n');
+    tumu.send_char('c');
     wait_for_focus(&mut tumu, true);
     // The new top sheet runs the mouse-asking script; wait for its ask to land.
     tumu.wait_for_text("MOUSE-ASKED");
@@ -303,7 +303,7 @@ fn the_keyboard_follows_a_click() {
     let mut tumu = harness("keyboard-follows");
     tumu.wait_for_column_text("[C-q ...]");
     tumu.send_prefix();
-    tumu.send_char('n');
+    tumu.send_char('c');
     wait_for_focus(&mut tumu, true);
 
     // Click the lower sheet, then close it. `x` acts on the focused sheet, so

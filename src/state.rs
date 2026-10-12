@@ -455,6 +455,8 @@ impl State {
         match command {
             Command::NewSheet => self.handle_new_sheet(),
             Command::CloseSheet => self.handle_close_sheet(),
+            Command::FocusNext => self.handle_focus_step(1),
+            Command::FocusPrevious => self.handle_focus_step(-1),
             Command::RotateSheets => self.handle_rotate_sheets(),
             Command::RotateOrientation => self.handle_rotate_orientation(),
             Command::ToggleFullScreen => self.handle_toggle_full_screen(),
@@ -512,6 +514,43 @@ impl State {
         }
         actions.extend(self.resize_actions());
         actions
+    }
+
+    /// Moves the focus `step` places along the stack, towards the bottom for a
+    /// positive step and the top for a negative one.
+    ///
+    /// This is `prefix n` (`+1`) and `prefix p` (`-1`): the two steps along the
+    /// stacking axis. Which axis that is is the state's
+    /// [`orientation`](State::orientation), and it does not change the move --
+    /// the stack's order *is* the direction, since the layout is derived from
+    /// that order -- so the two commands are one handler with a sign rather
+    /// than one per axis.
+    ///
+    /// The step stops at the ends of the stack: it lands on a sheet only when
+    /// there is one there, so at the bottom `prefix n` and at the top
+    /// `prefix p` leave the focus where it is. Nothing runs around to the other
+    /// end, because a wrap would move the keyboard to a sheet the user was not
+    /// stepping towards.
+    ///
+    /// The focused index is the anchor, not the focused [`SheetId`](crate::SheetId):
+    /// stepping is a move to the *next place* in the stack, and reading the
+    /// place first is what makes a stale focus -- a sheet the stack no longer
+    /// holds -- read as nothing focused rather than as a step from nowhere.
+    ///
+    /// Nothing is resized and no action is returned: the stack keeps its order,
+    /// so every region is exactly what it was and only the keyboard moved. The
+    /// edge repaints because the frame changed -- the label follows the focus.
+    fn handle_focus_step(&mut self, step: isize) -> Vec<Action> {
+        let Some(index) = self.focused_index() else {
+            return Vec::new();
+        };
+        let Some(next) = index.checked_add_signed(step) else {
+            return Vec::new();
+        };
+        if let Some((id, _)) = self.stack.sheets().get(next) {
+            self.focused = Some(*id);
+        }
+        Vec::new()
     }
 
     /// Moves the focused sheet to the bottom and the next one to the top.

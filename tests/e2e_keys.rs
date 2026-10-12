@@ -57,7 +57,7 @@ fn a_new_sheet_stacks_on_top() {
     tumu.wait_for_column_text("[C-q ...]");
 
     tumu.send_prefix();
-    tumu.send_char('n');
+    tumu.send_char('c');
 
     // Two sheets: the label moves to the new top sheet (column 39) and the
     // sheet that was 0 loses it. Both borders repaint in one frame, so wait for
@@ -77,7 +77,7 @@ fn closing_the_focused_sheet_grows_the_rest() {
     let mut tumu = harness("closing-grows");
     tumu.wait_for_column_text("[C-q ...]");
     tumu.send_prefix();
-    tumu.send_char('n');
+    tumu.send_char('c');
     tumu.wait_until("two sheet borders", |h| {
         h.screen_column(39).starts_with("└ [C-q ...]") && h.screen_column(79).starts_with("└")
     });
@@ -103,7 +103,7 @@ fn the_rotate_command_brings_the_stack_up_under_the_keyboard() {
     let mut tumu = harness("rotate");
     tumu.wait_for_column_text("[C-q ...]");
     tumu.send_prefix();
-    tumu.send_char('n');
+    tumu.send_char('c');
     tumu.wait_until("two sheet borders", |h| {
         h.screen_column(39).starts_with("└ [C-q ...]") && h.screen_column(79).starts_with("└")
     });
@@ -128,7 +128,7 @@ fn the_full_screen_command_fills_the_terminal_and_folds_back() {
     let mut tumu = harness("full-screen");
     tumu.wait_for_column_text("[C-q ...]");
     tumu.send_prefix();
-    tumu.send_char('n');
+    tumu.send_char('c');
     tumu.wait_until("two sheet borders", |h| {
         h.screen_column(39).starts_with("└ [C-q ...]") && h.screen_column(79).starts_with("└")
     });
@@ -151,6 +151,35 @@ fn the_full_screen_command_fills_the_terminal_and_folds_back() {
     // Folding back restores both, with focus where it was.
     tumu.wait_until("both sheet borders return", |h| {
         h.screen_column(39).starts_with("└ [C-q ...]") && h.screen_column(79).starts_with("└")
+    });
+}
+
+#[test]
+fn the_focus_step_moves_the_keyboard_between_the_sheets() {
+    let mut tumu = harness("focus-step");
+    tumu.wait_for_column_text("[C-q ...]");
+    tumu.send_prefix();
+    tumu.send_char('c');
+    // Two sheets split the columns 40/40 and the new one is on top, so the
+    // label sits on the top sheet's border at column 39.
+    tumu.wait_until("two sheet borders", |h| {
+        h.screen_column(39).starts_with("└ [C-q ...]") && h.screen_column(79).starts_with("└")
+    });
+
+    // `n` steps *down* the stack: focus lands on the sheet below, so the label
+    // moves to its border at column 79.
+    tumu.send_prefix();
+    tumu.send_char('n');
+    tumu.wait_until("the label moves down", |h| {
+        h.screen_column(79).starts_with("└ [C-q ...]") && h.screen_column(39).starts_with("└─")
+    });
+
+    // `p` steps back up, so the label returns to the top sheet. The layout
+    // never moved: only which sheet wears the label did.
+    tumu.send_prefix();
+    tumu.send_char('p');
+    tumu.wait_until("the label moves back up", |h| {
+        h.screen_column(39).starts_with("└ [C-q ...]") && h.screen_column(79).starts_with("└─")
     });
 }
 

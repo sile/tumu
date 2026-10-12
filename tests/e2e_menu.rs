@@ -50,8 +50,8 @@ fn a_chord_run_from_the_menu_closes_it_and_runs() {
     tumu.send_prefix();
     tumu.wait_until("the menu appears", |h| h.screen_contains("┌"));
 
-    // `n` adds a sheet; the menu goes away with it.
-    tumu.send_char('n');
+    // `c` adds a sheet; the menu goes away with it.
+    tumu.send_char('c');
 
     tumu.wait_until("the menu closes and a sheet is added", |h| {
         // Two sheets, so a second border is drawn below the first.

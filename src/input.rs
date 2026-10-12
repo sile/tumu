@@ -92,9 +92,15 @@ const fn chord(c: char) -> tuinix::KeyInput {
 ///
 /// This is the order the commands are worth reading in, not the order of the
 /// keys: making a sheet, then acting on it, then leaving.
+///
+/// `c` makes a sheet (`c` for *create*, since `n` has another job now) and the
+/// two steps are bound the way a pager spells its own paging: `p` is *previous*
+/// and `n` is *next*, where "next" is the direction the stack advances --
+/// downwards when the sheets run down the screen, rightwards when they run
+/// across it.
 pub const BINDINGS: &[Binding] = &[
     Binding {
-        key: chord('n'),
+        key: chord('c'),
         command: Command::NewSheet,
         label: "new sheet",
     },
@@ -102,6 +108,16 @@ pub const BINDINGS: &[Binding] = &[
         key: chord('x'),
         command: Command::CloseSheet,
         label: "close sheet",
+    },
+    Binding {
+        key: chord('p'),
+        command: Command::FocusPrevious,
+        label: "focus up/left",
+    },
+    Binding {
+        key: chord('n'),
+        command: Command::FocusNext,
+        label: "focus down/right",
     },
     Binding {
         key: chord('o'),

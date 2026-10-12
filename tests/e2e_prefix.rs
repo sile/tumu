@@ -86,7 +86,7 @@ fn the_configured_prefix_arms_the_latch() {
     // `C-q` is ordinary typing now, so it must not open a sheet: one sheet
     // keeps its border at the screen's last column and the terminal stays full.
     tumu.send_prefix_char('q');
-    tumu.send_char('n');
+    tumu.send_char('c');
     // Give the binary a chance to react before asserting it did not.
     std::thread::sleep(std::time::Duration::from_millis(200));
     tumu.wait_until("still one sheet", |h| {
@@ -96,7 +96,7 @@ fn the_configured_prefix_arms_the_latch() {
     // The configured prefix does the work: `C-o` then `n` stacks a new sheet,
     // so two borders appear (the new top sheet at column 39).
     tumu.send_prefix_char('o');
-    tumu.send_char('n');
+    tumu.send_char('c');
     tumu.wait_until("two sheet borders", |h| {
         h.screen_column(39).starts_with("└ [C-o ...]") && h.screen_column(79).starts_with("└")
     });

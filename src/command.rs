@@ -8,8 +8,8 @@
 /// One command a prefix chord can trigger.
 ///
 /// The set is deliberately small: it is the least that makes the stack
-/// touchable by hand (add, close, rotate, zoom, open the scrollback, leave).
-/// Navigation and the ratio are the next additions and will extend this enum.
+/// touchable by hand (add, close, step around, rotate, zoom, open the
+/// scrollback, leave). The ratio is the next addition and will extend this enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Command {
     /// Add a new sheet on top of the stack.
@@ -17,6 +17,30 @@ pub enum Command {
 
     /// Close the focused sheet.
     CloseSheet,
+
+    /// Move the focus to the sheet that comes next in the stack.
+    ///
+    /// "Next" is the step along the stacking axis, in the direction the stack
+    /// advances: the sheet *below* when the stack runs vertically, the sheet to
+    /// the *right* when it runs horizontally. The step is one place, not a
+    /// wrap: at the bottom (or the right) end of the stack it does nothing,
+    /// rather than run around to the top, so focus never moves somewhere the
+    /// user was not looking.
+    ///
+    /// Focus is what this moves, not the sheets: the stack keeps its order and
+    /// every region keeps its shape, so there is nothing to resize and no
+    /// session to wake. The command carries nothing because the direction is
+    /// the command -- the axis it is read along belongs to the state, which is
+    /// why the two steps are two commands rather than one with a sign.
+    FocusNext,
+
+    /// Move the focus to the sheet that comes before in the stack.
+    ///
+    /// The inverse step of [`FocusNext`](Command::FocusNext): the sheet
+    /// *above* in a vertical stack, the one to the *left* in a horizontal one.
+    /// It is a plain step for the same reason -- one place, no wrap, nothing
+    /// resized.
+    FocusPrevious,
 
     /// Move the focused sheet to the bottom, bringing the next one up.
     RotateSheets,

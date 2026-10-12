@@ -67,7 +67,7 @@ fn two_sheets_each_show_their_own_output() {
     tumu.wait_for_text("BOTH-MARK");
 
     tumu.send_prefix();
-    tumu.send_char('n');
+    tumu.send_char('c');
 
     // Both content regions are on screen in the same frame once the second
     // sheet has also printed.
