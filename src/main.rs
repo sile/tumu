@@ -128,12 +128,14 @@ fn main() -> noargs::Result<()> {
     let seed = tuinix::Size { rows: 24, cols: 80 };
     let shell = shell_command(shell);
     let editor = editor_command();
+    let diff = diff_command();
+    let grep = grep_command();
     let editor_dir = editor_dir();
     let state = tumu::State::new(seed)
         .with_prefix_char(prefix_char)
         .with_orientation(orientation)
         .with_ratio(tumu::Ratio::from_num(ratio_num));
-    match app::App::new(state, shell, editor, scrollback, editor_dir) {
+    match app::App::new(state, shell, editor, diff, grep, scrollback, editor_dir) {
         Ok(mut app) => app.run()?,
         Err(err) => {
             eprintln!("tumu: {err}");
@@ -205,6 +207,28 @@ fn editor_dir() -> PathBuf {
 /// arguments, not a live [`Command`](std::process::Command): a fresh command is
 /// built from it per spawn, because `termnix` registers child setup on the
 /// command and a command cannot be spawned twice.
-fn shell_command(program: PathBuf) -> app::ShellCommand {
-    app::ShellCommand::new(program, vec![OsString::from("-l")])
+fn shell_command(program: PathBuf) -> app::Recipe {
+    app::Recipe::new(program, vec![OsString::from("-l")])
+}
+
+/// Builds the recipe for the tool `prefix d` opens in a sheet: the diff browser.
+///
+/// Like the editor, the program is configurable so a user (or a test) can point
+/// the feature at another tool without a rebuild. `$TUMU_MAMEDIFF` names it and
+/// falls back to `mamediff`, the tool this is built around; no arguments are
+/// added, because the tool reads the repository it is started in and needs no
+/// file or flag from tumu.
+fn diff_command() -> app::Recipe {
+    let program = std::env::var_os("TUMU_MAMEDIFF").unwrap_or_else(|| "mamediff".into());
+    app::Recipe::plain(PathBuf::from(program))
+}
+
+/// Builds the recipe for the tool `prefix s` opens in a sheet: the grep browser.
+///
+/// The sibling of [`diff_command`]: `$TUMU_MAMEGREP` names it and falls back to
+/// `mamegrep`. No arguments are added, because the tool has its own prompt for
+/// the search -- the pattern is typed in the sheet, not decided here.
+fn grep_command() -> app::Recipe {
+    let program = std::env::var_os("TUMU_MAMEGREP").unwrap_or_else(|| "mamegrep".into());
+    app::Recipe::plain(PathBuf::from(program))
 }

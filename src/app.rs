@@ -68,24 +68,32 @@ enum Interest {
     Session(tumu::TermnixSessionId),
 }
 
-/// The program and arguments to run in a sheet, rebuilt per spawn.
+/// A program and its fixed arguments, rebuilt per spawn.
+///
+/// Every sheet's child comes from one of these: the shell, the editor, or a
+/// tool. The recipe is *not* a live [`Command`] -- `termnix` registers child
+/// setup on the command it is handed, and a command cannot be spawned twice --
+/// so a fresh command is built from it for every spawn. What varies per sheet
+/// on top of the recipe (the editor's file) is a parameter of the spawn, not a
+/// field.
 #[derive(Debug, Clone)]
-pub struct ShellCommand {
+pub struct Recipe {
     program: PathBuf,
     args: Vec<OsString>,
 }
 
-impl ShellCommand {
+impl Recipe {
     /// Builds a recipe from a program and its arguments.
     pub fn new(program: PathBuf, args: Vec<OsString>) -> Self {
         Self { program, args }
     }
 
+    /// Builds a recipe from a program and no arguments.
+    pub fn plain(program: PathBuf) -> Self {
+        Self::new(program, Vec::new())
+    }
+
     /// Builds a fresh [`Command`] from the recipe.
-    ///
-    /// The recipe is not a live command: `termnix` registers child setup on the
-    /// command it is handed, and a command cannot be spawned twice, so every
-    /// spawn gets a new one.
     pub fn command(&self) -> Command {
         let mut command = Command::new(&self.program);
         command.args(&self.args);
@@ -95,10 +103,11 @@ impl ShellCommand {
 
 /// The program an editor sheet runs.
 ///
-/// This mirrors [`ShellCommand`]: the recipe is a program and its fixed flags,
-/// not a live [`Command`], so a fresh one is built for each launch. The file to
-/// open is not part of the recipe -- it is made fresh per sheet -- so it is a
-/// parameter rather than a field.
+/// This mirrors [`Recipe`]: the recipe is a program and its fixed flags, not a
+/// live [`Command`], so a fresh one is built for each launch. The file to open
+/// is not part of the recipe -- it is made fresh per sheet -- so it is a
+/// parameter rather than a field, which is why this wraps a recipe instead of
+/// being one.
 #[derive(Debug, Clone)]
 pub struct EditorCommand {
     program: PathBuf,
@@ -228,8 +237,12 @@ pub struct App {
     driver: tuinix::TerminalDriver,
     decoder: tuinix::InputDecoder,
     previous: Option<tuinix::Frame>,
-    shell: ShellCommand,
+    shell: Recipe,
     editor: EditorCommand,
+    /// The recipe `prefix d` runs in its sheet: the diff browser.
+    diff: Recipe,
+    /// The recipe `prefix s` runs in its sheet: the grep browser.
+    grep: Recipe,
     /// Where the files an editor sheet opens are written.
     ///
     /// The core names a bare file name (see
@@ -278,8 +291,10 @@ impl App {
     /// on a missing directory.
     pub fn new(
         state: tumu::State,
-        shell: ShellCommand,
+        shell: Recipe,
         editor: EditorCommand,
+        diff: Recipe,
+        grep: Recipe,
         scrollback: tumu::ScrollbackLimit,
         editor_dir: PathBuf,
     ) -> std::io::Result<Self> {
@@ -291,6 +306,8 @@ impl App {
             previous: None,
             shell,
             editor,
+            diff,
+            grep,
             editor_dir,
             editor_files: HashMap::new(),
             state,
@@ -802,6 +819,11 @@ impl App {
                 editor_path = Some(path.clone());
                 self.editor.command(&path)
             }
+            // The tool sheets are plain recipes, like the shell: nothing about
+            // the sheet is derived from the tool, so the command is the recipe
+            // as it stands.
+            tumu::Program::Diff => self.diff.command(),
+            tumu::Program::Grep => self.grep.command(),
         };
         let session = termnix::Session::new(&mut command, size)?;
         let id = tumu::TermnixSessionId::new(self.next_session_id);

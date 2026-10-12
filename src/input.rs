@@ -103,11 +103,27 @@ const fn chord(c: char) -> tuinix::KeyInput {
 /// a thing everywhere else: `+` widens the sheets at hand, `-` narrows them.
 /// They are the run-time half of the `--ratio` setting and read left to right
 /// the way the arithmetic does.
+///
+/// The tool sheets sit next to `c` because they are the other ways to get a
+/// sheet: `d` for the *diff* browser and `s` for the grep one, each opening the
+/// tool in a sheet of its own. The keys are mnemonics for the tools (`d` for
+/// *diff*, `s` for *search*) rather than words, so they read as the pair the
+/// tools make.
 pub const BINDINGS: &[Binding] = &[
     Binding {
         key: chord('c'),
         command: Command::NewSheet,
         label: "new sheet",
+    },
+    Binding {
+        key: chord('d'),
+        command: Command::NewDiffSheet,
+        label: "diff sheet",
+    },
+    Binding {
+        key: chord('s'),
+        command: Command::NewGrepSheet,
+        label: "grep sheet",
     },
     Binding {
         key: chord('x'),

@@ -8,8 +8,8 @@
 /// One command a prefix chord can trigger.
 ///
 /// The set is deliberately small: it is the least that makes the stack
-/// touchable by hand (add, close, step around, move, resize the split, rotate,
-/// zoom, open the scrollback, leave).
+/// touchable by hand (add -- a shell, an editor, a tool --, close, step around,
+/// move, resize the split, rotate, zoom, open the scrollback, leave).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Command {
     /// Add a new sheet on top of the stack.
@@ -120,6 +120,29 @@ pub enum Command {
     /// user read a different row before choosing -- the shape `kk`'s ext mode
     /// has. The command carries nothing: the menu holds its own bindings.
     OpenExtMenu,
+
+    /// Add a sheet whose session is `mamediff`, in place of a shell.
+    ///
+    /// This is `prefix d`. It is the editor sheet's shape one step further: a
+    /// new sheet on top, under the keyboard, whose program is not the shell but
+    /// an external tool -- here the diff browser. The sheet is a sheet like any
+    /// other, so its child is painted by tumu and its exit closes it through the
+    /// ordinary [`SessionExited`](crate::Event::SessionExited) path; nothing is
+    /// handed over to it.
+    ///
+    /// The command names *which* tool, not *how* to run it: the program and its
+    /// arguments are the edge's, which is also the side that may read the
+    /// environment for an override. The core only decides that a sheet is added
+    /// and what kind of child it hosts.
+    NewDiffSheet,
+
+    /// Add a sheet whose session is `mamegrep`, in place of a shell.
+    ///
+    /// This is `prefix s`, the sibling of [`NewDiffSheet`](Command::NewDiffSheet):
+    /// the same new sheet on top, running the grep browser instead of the diff
+    /// one. The split of work is the same -- the core names the tool, the edge
+    /// builds the command.
+    NewGrepSheet,
 
     /// Leave the multiplexer.
     Quit,

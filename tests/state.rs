@@ -226,6 +226,81 @@ fn the_new_sheet_command_stacks_a_sheet_on_top() {
 }
 
 #[test]
+fn the_diff_sheet_command_runs_the_diff_browser_in_a_new_top_sheet() {
+    let mut state = state_with(24, 80, 1);
+
+    let actions = run_command(&mut state, 'd');
+
+    // The tool sheet is a sheet like any other: pushed on top, focused, and
+    // spawned through the one `SpawnSession` action. Only the Program differs
+    // from `prefix c`.
+    assert_eq!(state.stack.len(), 2);
+    assert_eq!(state.focused, Some(state.stack.sheets()[0].0));
+    assert_eq!(
+        actions.first(),
+        Some(&tumu::Action::SpawnSession {
+            index: 0,
+            program: tumu::Program::Diff
+        }),
+        "the first action spawns the diff browser in the new top sheet, got {actions:?}"
+    );
+    // The sheets under it re-derive their regions, exactly as for a shell sheet.
+    assert!(
+        actions
+            .iter()
+            .any(|action| matches!(action, tumu::Action::ResizeSession { .. })),
+        "the stack is laid out around the new sheet, got {actions:?}"
+    );
+}
+
+#[test]
+fn the_grep_sheet_command_runs_the_grep_browser_in_a_new_top_sheet() {
+    let mut state = state_with(24, 80, 1);
+
+    let actions = run_command(&mut state, 's');
+
+    assert_eq!(state.stack.len(), 2);
+    assert_eq!(state.focused, Some(state.stack.sheets()[0].0));
+    assert_eq!(
+        actions.first(),
+        Some(&tumu::Action::SpawnSession {
+            index: 0,
+            program: tumu::Program::Grep
+        }),
+        "the first action spawns the grep browser in the new top sheet, got {actions:?}"
+    );
+}
+
+#[test]
+fn the_tool_sheets_are_told_apart_from_each_other_and_from_the_shell() {
+    // `d`, `s`, and `c` are three ways to add a sheet and differ only in what
+    // runs in it, so the three programs must stay distinct: a shared variant
+    // would make `prefix s` open `mamediff`.
+    assert_ne!(tumu::Program::Diff, tumu::Program::Grep);
+    assert_ne!(tumu::Program::Diff, tumu::Program::Shell);
+    assert_ne!(tumu::Program::Grep, tumu::Program::Shell);
+}
+
+#[test]
+fn a_tool_sheet_can_be_opened_on_an_empty_stack() {
+    // The tool commands add a sheet like `prefix c` does, so -- unlike the
+    // commands that act on the focused sheet -- they work when there is none.
+    let mut state = tumu::State::new(size(24, 80));
+
+    let actions = run_command(&mut state, 'd');
+
+    assert_eq!(state.stack.len(), 1);
+    assert_eq!(
+        actions.first(),
+        Some(&tumu::Action::SpawnSession {
+            index: 0,
+            program: tumu::Program::Diff
+        }),
+        "an empty stack still gets a diff sheet, got {actions:?}"
+    );
+}
+
+#[test]
 fn the_close_sheet_command_drops_the_focused_sheet() {
     let mut state = state_with(24, 80, 2);
     // Attach a session to the focused (top) sheet, so closing it has a session

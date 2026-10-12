@@ -11,6 +11,7 @@ tumu
 - Feature
   - Stacked sheets (see below)
   - No sessions, panes, pop-up windows
+  - Tool sheets: run the diff / grep browser in a sheet of its own
   - Stacking axis set by `prefix r` or `--orientation`
   - Split odds set by `--ratio`, moved at run time with `prefix +` / `prefix -`
   - No server (a standalone process)
@@ -125,6 +126,35 @@ is what it names everywhere else, so there is nothing new to learn. There is no
 sheet runs it and a mid-run change would either miss the sheets already up or
 replace a shell a user is working in.
 
+Tool sheets
+-----------
+
+A sheet does not have to run the shell. Two chords open a sheet whose session is
+an external tool instead:
+
+- `prefix d` -- the diff browser (`mamediff`)
+- `prefix s` -- the grep browser (`mamegrep`)
+
+The sheet is a sheet like any other: it is pushed on top, takes the focus, and
+is painted by tumu, so the tool is a child of tumu and its exit closes the sheet
+through the ordinary session-exit path. Nothing is handed over, exactly as for
+the editor sheet `prefix l` opens.
+
+The tool is a child, not a program tumu knows how to speak to: no pattern or
+revision is passed in, so the tool starts on its own prompt and the search or the
+diff is chosen inside it. Where it looks is where the sheet is started, so it
+reads the repository tumu itself was started in.
+
+The program is configurable, so a user (or a test) can point the chords at
+another tool without a rebuild:
+
+- `$TUMU_MAMEDIFF` (default `mamediff`)
+- `$TUMU_MAMEGREP` (default `mamegrep`)
+
+The two names sit alongside `$TUMU_EDITOR` and are read the same way. There is no
+`--` flag for them and no `prefix` command: they are tools, not settings of the
+multiplexer, and a run is expected to reach for the same ones every time.
+
 Orientation
 -----------
 
@@ -200,7 +230,9 @@ Because the prefix is `Ctrl+<char>` and every chord is an unmodified `<char>`,
 the two never collide: any character may be the prefix, even one a chord uses,
 and the setting needs no check against the binding table.
 
-- `prefix c` -- new sheet on top
+- `prefix c` -- new sheet on top (runs the shell)
+- `prefix d` -- new sheet running the diff browser (`mamediff`)
+- `prefix s` -- new sheet running the grep browser (`mamegrep`)
 - `prefix x` -- open the extended menu (see below)
 - `prefix p` -- move the focus up (vertical) / left (horizontal)
 - `prefix n` -- move the focus down (vertical) / right (horizontal)
@@ -361,6 +393,8 @@ the center of the terminal:
 ```
    ┌───────────────────┐
    │ c    new sheet    │
+   │ d    diff sheet   │
+   │ s    grep sheet   │
    │ x    ext menu     │
    | p    ...          |
    | n    ...          |
@@ -430,10 +464,11 @@ click on a menu row is a click on the sheet under the box.
 Known issues
 ------------
 
-- A sheet whose `prefix l` editor fails to launch (a `$TUMU_EDITOR` that is
-  missing, not executable, or does not accept `--tail`) stays in the stack as an
-  empty sheet and cannot be closed by typing to it, because it has no child to
-  type to. It is closed like any other sheet, with `prefix x` then `k`.
+- A sheet whose program fails to launch -- a `$TUMU_EDITOR` that is missing or
+  does not accept `--tail`, or a `$TUMU_MAMEDIFF` / `$TUMU_MAMEGREP` that is not
+  installed -- stays in the stack as an empty sheet and cannot be closed by
+  typing to it, because it has no child to type to. It is closed like any other
+  sheet, with `prefix x` then `k`.
 - Only the *focused* sheet's reports are forwarded. A background sheet gets
   nothing while it is not focused -- the same as the keyboard -- even if its
   child asked for the mouse, so a tracking program in a background sheet does not

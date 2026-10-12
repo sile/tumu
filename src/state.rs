@@ -521,7 +521,9 @@ impl State {
     /// Carries a resolved command out, returning the actions it expands to.
     fn handle_command(&mut self, command: Command) -> Vec<Action> {
         match command {
-            Command::NewSheet => self.handle_new_sheet(),
+            Command::NewSheet => self.handle_new_sheet(Program::Shell),
+            Command::NewDiffSheet => self.handle_new_sheet(Program::Diff),
+            Command::NewGrepSheet => self.handle_new_sheet(Program::Grep),
             Command::CloseSheet => self.handle_close_sheet(),
             Command::FocusNext => self.handle_focus_step(1),
             Command::FocusPrevious => self.handle_focus_step(-1),
@@ -545,12 +547,19 @@ impl State {
     /// The existing sheets keep their sessions and re-derive their regions, so
     /// the new sheet costs each of them rows; the spawn is named by index
     /// because the new sheet is on top.
-    fn handle_new_sheet(&mut self) -> Vec<Action> {
+    ///
+    /// The three ways to add a sheet -- `prefix c`, `prefix d`, and `prefix s`
+    /// -- differ only in the [`Program`] their session runs, so they are one
+    /// handler with a program rather than three: the sheet is pushed the same
+    /// way and the new child takes the focus the same way, whatever it is. That
+    /// is also why the tool sheets need no new action: an external command is
+    /// spawned exactly as the shell is, by [`SpawnSession`](Action::SpawnSession).
+    fn handle_new_sheet(&mut self, program: Program) -> Vec<Action> {
         let id = self.stack.push_top();
         self.focused = Some(id);
         let mut actions = vec![Action::SpawnSession {
             index: STACK_TOP,
-            program: Program::Shell,
+            program,
         }];
         actions.extend(self.resize_actions());
         actions

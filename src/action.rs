@@ -4,8 +4,14 @@
 ///
 /// The core decides *which* program a sheet hosts; it does not build the
 /// command. A sheet is usually a shell, but `prefix l` opens one whose session
-/// is an editor reading a file the core also named -- so the choice has to
-/// travel with the spawn rather than be fixed at the edge.
+/// is an editor reading a file the core also named, and `prefix d` / `prefix s`
+/// open ones whose sessions are external tools in place of the shell -- so the
+/// choice has to travel with the spawn rather than be fixed at the edge.
+///
+/// Every variant names a *role*, not a program or a path: the edge turns the
+/// role into a command and reads the environment for whatever override belongs
+/// to it. So the core never spells `mamediff` or `/bin/sh`, and a run-time name
+/// change needs no change here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Program {
     /// The user's shell, as every ordinary sheet runs.
@@ -23,6 +29,22 @@ pub enum Program {
         /// The file to open, without a directory.
         name: String,
     },
+
+    /// The diff browser (`mamediff`), as `prefix d` opens it.
+    ///
+    /// A plain external command, with no file for the core to name: it reads
+    /// the repository it is started in, so where it goes and what it shows are
+    /// its own. The edge owns the program and its arguments, exactly as it owns
+    /// the shell's.
+    Diff,
+
+    /// The grep browser (`mamegrep`), as `prefix s` opens it.
+    ///
+    /// The sibling of [`Diff`](Program::Diff): the same kind of plain external
+    /// command, run in a sheet of its own. The pattern it starts on is not the
+    /// core's to choose -- the tool has its own prompt -- so nothing travels
+    /// with the variant but the role.
+    Grep,
 }
 
 /// One thing the edge should do.
