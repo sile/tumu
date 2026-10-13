@@ -65,7 +65,7 @@ pub enum Command {
     ///
     /// This is a *layout* change, not a view one: every region is derived from
     /// the ratio, so the sessions are resized to match. The ratio is bounded
-    /// ([`Ratio::MAX_NUM`](crate::Ratio::MAX_NUM)), so at the widest share the
+    /// ([`MAX_RATIO_NUM`](crate::MAX_RATIO_NUM)), so at the widest share the
     /// command is a no-op rather than a share that grows without end.
     WidenSheet,
 

@@ -250,6 +250,23 @@ impl TumuHarness {
         self.screen_rows().join("\n")
     }
 
+    /// The whole screen with rows joined by nothing, so text wrapped across a
+    /// row boundary reads as one run.
+    ///
+    /// A box narrows its text to its interior width, so a long message is split
+    /// at the wrap point rather than at a word: a needle that straddles the wrap
+    /// is on no single row. Joining the rows with no separator puts it back, so a
+    /// test can match a message without having to know where the box happened to
+    /// fold it.
+    pub fn screen_joined(&self) -> String {
+        self.screen_rows().join("")
+    }
+
+    /// Whether the screen, rows joined with no separator, contains `needle`.
+    pub fn screen_joined_contains(&self, needle: &str) -> bool {
+        self.screen_joined().contains(needle)
+    }
+
     /// Pumps the session until `pred` holds, or panics after `WAIT_TIMEOUT`.
     ///
     /// `pred` receives the harness so it can read the grid; it must not mutate

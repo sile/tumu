@@ -32,12 +32,12 @@ pub enum Event {
     /// The whole [`tuinix::MouseInput`] rides along -- kind, position, and
     /// modifiers -- so a later gesture (a scroll, a modifier-click) does not
     /// need another event variant. Only the position and the press kind are read
-    /// today; see [`handle_mouse`](crate::State::handle_mouse).
+    /// today.
     ///
     /// Moving the focus is *all* the core does with a report, and the only thing
     /// a report can do: a click is not shown in the frame and nothing about it is
     /// remembered. The menu is chosen by keys, so a click can never run a
-    /// command -- see [`handle_mouse`](crate::State::handle_mouse).
+    /// command.
     Mouse(tuinix::MouseInput),
 
     /// Whether the focused sheet's child is asking to be sent the mouse.

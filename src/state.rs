@@ -40,8 +40,7 @@ pub struct State {
     /// Whether the prefix latch is armed.
     ///
     /// It is a latch, not a mode: arming it does not change what a sheet shows,
-    /// and it clears on the next key whatever that key is. See
-    /// [`handle_key`](State::handle_key) for the rule.
+    /// and it clears on the next key whatever that key is.
     pub prefix: bool,
 
     /// Which way the sheets stack: top to bottom, or left to right.
@@ -142,7 +141,7 @@ pub struct State {
     /// the other sheets were never moved and their regions are still a pure
     /// function of the size, the order, and the ratio. It is deliberately not
     /// transitive -- a resize keeps it, because the layout it hides is
-    /// re-derived either way; see [`handle_resize`](State::handle_resize).
+    /// re-derived either way.
     pub full_screen: bool,
 
     /// Which sheet the commands act on.
@@ -150,9 +149,7 @@ pub struct State {
     /// It is a [`SheetId`], not an index, so a sheet keeps its identity as the
     /// stack is reordered around it; [`focused_index`](State::focused_index)
     /// turns it into a position. It is cleared the moment it would name a sheet
-    /// that is no longer in the stack -- see
-    /// [`handle_move_sheet_to_top`](State::handle_move_sheet_to_top) and
-    /// [`handle_session_exited`](State::handle_session_exited).
+    /// that is no longer in the stack -- whenever a sheet is closed or moved.
     pub focused: Option<SheetId>,
 
     /// Whether the loop should stop.
@@ -243,7 +240,7 @@ impl State {
     /// not fit.
     ///
     /// This is the one place the menu's geometry is derived, so the renderer and
-    /// [`handle_mouse`](State::handle_mouse) test the same rectangles: a click
+    /// the pointer handling test the same rectangles: a click
     /// lands on a command exactly when the row the renderer drew for that
     /// command was clicked.
     pub fn menu_layout(&self) -> Option<crate::MenuLayout> {
@@ -254,7 +251,7 @@ impl State {
     /// does not fit.
     ///
     /// The second menu's geometry, derived the same way: the renderer and
-    /// [`handle_mouse`](State::handle_mouse) read it, so a click and the box on
+    /// the pointer handling read it, so a click and the box on
     /// screen agree. The prefix character does not enter it, because the extended
     /// menu does not list a prefix chord.
     pub fn ext_menu_layout(&self) -> Option<crate::MenuLayout> {
@@ -1031,9 +1028,9 @@ impl State {
     ///
     /// This is where full screen enters the layout: with it on, the focused
     /// sheet takes the whole terminal and the others get no region at all,
-    /// which both stops the edge from drawing them and stops
-    /// [`resize_actions`](State::resize_actions) from resizing their sessions to
-    /// a zero grid. The regions the other sheets would have had are not lost --
+    /// which both stops the edge from drawing them and stops their sessions
+    /// being resized to a zero grid. The regions the other sheets would have had
+    /// are not lost --
     /// they are the same pure function of the size, the order, the ratio, and
     /// the orientation, so clearing the flag brings them straight back.
     ///
@@ -1072,7 +1069,7 @@ impl State {
     /// full-screen sheet draws **no** border: it fills the whole region, so its
     /// content is the region itself. That one exception is why this lives on the
     /// state -- full screen is the state's fact, and the two sides that size a
-    /// child ([`resize_actions`](State::resize_actions) here and the edge's
+    /// child (this side and the edge's
     /// spawn) have to agree with the renderer, which is the third reader.
     ///
     /// Returns `None` when there is no such sheet. A sheet the full screen

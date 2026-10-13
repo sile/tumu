@@ -365,7 +365,7 @@ fn border_label(prefix_char: char) -> String {
 /// The frame is the sheet's own, so a border that would cross its far edge is
 /// clipped here and cannot reach a neighbour. A title is the child's, so it may
 /// hold any character at all; in a vertical stack its width is measured rather
-/// than assumed (see [`push_str()`] below), while a horizontal border is one
+/// than assumed, while a horizontal border is one
 /// cell per character by construction.
 pub fn sheet_frame(
     sheet: &crate::Sheet,

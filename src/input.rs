@@ -64,9 +64,8 @@ pub fn is_prefix(c: char, key: tuinix::KeyInput) -> bool {
 /// shows for it.
 ///
 /// The three live together so they cannot drift: the menu is built from this
-/// table and
-/// [`resolve_command`] answers out of it, so a chord cannot be bound without a
-/// label or labelled without being bound.
+/// table and the chord lookup answers out of it, so a chord cannot be bound
+/// without a label or labelled without being bound.
 #[derive(Debug, Clone, Copy)]
 pub struct Binding {
     /// The key, after the prefix, that runs the command.
@@ -186,9 +185,9 @@ pub const BINDINGS: &[Binding] = &[
 /// pick, which is the extra step the effect deserves.
 ///
 /// The table is a second one rather than a flag on a binding because the two
-/// sets are read in different modes: [`resolve_command`] answers for a latched
-/// prefix key and [`resolve_ext_command`] for a key pressed while the menu is
-/// open. Keeping them apart is what keeps a command from drifting from the mode
+/// sets are read in different modes: the prefix chords are looked up while the
+/// prefix is latched, the menu chords while the menu is open. Keeping them apart
+/// is what keeps a command from drifting from the mode
 /// it belongs to -- a `q` at the prefix is unbound (the prefix already carries
 /// the command), while a `q` in the menu is *quit*.
 ///

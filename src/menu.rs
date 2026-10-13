@@ -137,8 +137,8 @@ pub fn menu_layout(size: tuinix::Size, prefix_key: &str) -> Option<MenuLayout> {
 /// because the prefix is not part of this menu -- it is *opened* by the prefix,
 /// and the keys it offers are a fresh set of chords, not the prefix's own.
 ///
-/// The two menus share [`layout`], so a box is centred and measured by one
-/// routine whether it holds ten commands or two.
+/// The two menus share one layout routine, so a box is centred and measured by
+/// the same code whether it holds ten commands or two.
 pub fn ext_menu_layout(size: tuinix::Size) -> Option<MenuLayout> {
     layout(crate::EXT_BINDINGS, size, None)
 }

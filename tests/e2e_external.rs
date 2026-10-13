@@ -151,16 +151,19 @@ fn a_tool_that_is_not_installed_shows_an_error_and_leaves_tumu_running() {
     tumu.send_char('d');
 
     // The window names the program that would not start, and tumu is still
-    // painting: the run did not end.
+    // painting: the run did not end. The message is matched against the screen
+    // with rows joined, because the box wraps it and the tool's name straddles
+    // the wrap for some lengths of temp path.
     tumu.wait_until("the error window names the missing tool", |h| {
-        h.screen_contains("mamediff") || h.screen_contains("does-not-exist")
+        h.screen_joined_contains("failed to start") && h.screen_joined_contains("does-not-exist")
     });
 
     // Any key dismisses it, and the shell sheet underneath is untouched -- the
     // failed sheet was closed rather than left empty.
     tumu.send_char(' ');
     tumu.wait_until("the window closes and the shell remains", |h| {
-        !h.screen_contains("failed to start") && h.screen_rows()[39].starts_with("└ [C-q ...]")
+        !h.screen_joined_contains("failed to start")
+            && h.screen_rows()[39].starts_with("└ [C-q ...]")
     });
     assert!(
         tumu.screen_contains("SHELL-RUNNING"),
