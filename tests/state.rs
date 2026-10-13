@@ -1950,3 +1950,117 @@ fn a_screen_too_small_for_the_box_shows_no_menu() {
     assert!(!state.menu, "but there is no menu to show");
     assert!(state.menu_layout().is_none());
 }
+
+#[test]
+fn a_failed_spawn_closes_the_sheet_and_keeps_the_message() {
+    // The sheet that could not start must not stay in the stack as an empty
+    // sheet no key can reach: it is removed like a sheet whose child exited, and
+    // the message is kept for the error window.
+    let mut state = state_with(24, 80, 2);
+    let bottom = state.stack.sheets()[1].0;
+
+    let actions = state.update(tumu::Event::SessionFailed {
+        index: 0,
+        message: "failed to start \"mamediff\": No such file or directory".to_string(),
+    });
+
+    assert_eq!(state.stack.len(), 1, "the failed sheet is gone");
+    assert_eq!(state.focused, Some(bottom), "the focus moved off it");
+    assert!(
+        state
+            .error
+            .as_deref()
+            .is_some_and(|m| m.contains("mamediff")),
+        "the message is kept for the window"
+    );
+    // The remaining sheet re-derives its region, so the sessions are resized --
+    // exactly as when a sheet closes for any other reason.
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, tumu::Action::ResizeSession { .. })),
+        "the rest of the stack is re-laid out: {actions:?}"
+    );
+}
+
+#[test]
+fn a_failed_spawn_while_full_screen_clears_the_flag() {
+    // A full-screen sheet whose spawn failed would leave nothing to show, so the
+    // flag clears rather than zoom the sheet below it -- the same rule a sheet
+    // dying under full screen follows.
+    let mut state = state_with(24, 80, 2);
+    run_command(&mut state, 'z');
+    assert!(state.full_screen);
+
+    state.update(tumu::Event::SessionFailed {
+        index: 0,
+        message: "boom".to_string(),
+    });
+
+    assert!(!state.full_screen, "the flag clears with the sheet");
+    assert!(state.error.is_some());
+}
+
+#[test]
+fn a_key_dismisses_the_error_window_and_does_nothing_else() {
+    // The window is modal: the next key is the acknowledgement and never a
+    // command or a keystroke for a sheet.
+    let mut state = state_with(24, 80, 1);
+    state.update(tumu::Event::SessionFailed {
+        index: 0,
+        message: "boom".to_string(),
+    });
+
+    let actions = state.update(tumu::Event::Key(ch('c')));
+
+    assert!(actions.is_empty(), "the key only dismisses: {actions:?}");
+    assert!(state.error.is_none(), "the window is gone");
+    assert!(!state.prefix, "no latch was armed");
+}
+
+#[test]
+fn a_click_dismisses_the_error_window_and_moves_no_focus() {
+    let mut state = state_with(24, 80, 2);
+    let top = state.stack.sheets()[0].0;
+    state.update(tumu::Event::SessionFailed {
+        index: 0,
+        message: "boom".to_string(),
+    });
+    let before = state.focused;
+
+    // A click on the sheet below would normally move the focus to it; the window
+    // being modal means it only closes.
+    let actions = state.update(tumu::Event::Mouse(click(5, 60)));
+
+    assert!(actions.is_empty(), "the click only dismisses: {actions:?}");
+    assert!(state.error.is_none());
+    assert_eq!(state.focused, before, "the focus did not move");
+    assert_ne!(state.focused, Some(top));
+}
+
+#[test]
+fn the_error_window_is_not_shown_until_a_spawn_fails() {
+    let state = state_with(24, 80, 1);
+    assert!(state.error.is_none());
+    assert!(state.error_layout().is_none());
+}
+
+#[test]
+fn a_second_failure_replaces_the_first_message() {
+    // The newest failure is the one still worth reading, so it replaces the old
+    // message rather than queueing behind it.
+    let mut state = state_with(24, 80, 2);
+    state.update(tumu::Event::SessionFailed {
+        index: 0,
+        message: "first".to_string(),
+    });
+    assert_eq!(state.stack.len(), 1, "the first failure closed its sheet");
+
+    state.update(tumu::Event::SessionFailed {
+        index: 0,
+        message: "second".to_string(),
+    });
+
+    assert_eq!(state.error.as_deref(), Some("second"), "the newest message");
+    assert_eq!(state.stack.len(), 0, "and its own sheet is closed too");
+}

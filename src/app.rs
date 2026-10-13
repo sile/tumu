@@ -99,6 +99,15 @@ impl Recipe {
         command.args(&self.args);
         command
     }
+
+    /// Returns the program the recipe runs.
+    ///
+    /// It is read only to name the program in a failure message: a spawn that
+    /// fails has to say *what* would not start, and the recipe is where the path
+    /// lives.
+    pub fn program(&self) -> &Path {
+        &self.program
+    }
 }
 
 /// The program an editor sheet runs.
@@ -131,6 +140,14 @@ impl EditorCommand {
         command.arg("--tail");
         command.arg(path);
         command
+    }
+
+    /// Returns the program the editor is launched as.
+    ///
+    /// Like [`Recipe::program`], it is read only to name the program in a
+    /// failure message.
+    pub fn program(&self) -> &Path {
+        &self.program
     }
 }
 
@@ -336,12 +353,18 @@ impl App {
         &mut self.driver
     }
 
-    /// Runs the poll loop until the core asks to leave or no session is left.
+    /// Runs the poll loop until the core asks to leave, no session is left, and
+    /// no error window is up.
     ///
     /// A `quit` command sets [`App::exit`]; the loop also stops on its own when
     /// the last session goes, so a stack the user emptied still returns.
+    ///
+    /// It does *not* stop while an error window is up, even with no session
+    /// left: a program that fails to launch before any sheet is up -- a missing
+    /// shell -- would otherwise take tumu down without ever showing the reason.
+    /// The window asks for one key, and the loop stays for it.
     pub fn run(&mut self) -> std::io::Result<()> {
-        while !self.exit && !self.sessions.is_empty() {
+        while !self.exit && !(self.sessions.is_empty() && self.state.error.is_none()) {
             self.drain_sessions()?;
             if self.dirty {
                 self.render()?;
@@ -775,7 +798,20 @@ impl App {
                     program,
                     cwd_from,
                 } => {
-                    self.spawn_session(index, program, cwd_from)?;
+                    // A spawn that fails must not end the run: a missing editor
+                    // or an uninstalled tool is the user's to fix, not a reason
+                    // to lose the sheets already up. The failure is reported to
+                    // the core instead, which closes the sheet that could not
+                    // start and shows the message in the error window. A spawn
+                    // that the region could not host is not a failure and is a
+                    // silent no-op (see `spawn_session`).
+                    if let Err(err) = self.spawn_session(index, program, cwd_from) {
+                        let actions = self.update_state(tumu::Event::SessionFailed {
+                            index,
+                            message: err,
+                        });
+                        self.dispatch(actions)?;
+                    }
                 }
                 tumu::Action::ResizeSession { index, size } => {
                     self.resize_session(index, size);
@@ -811,12 +847,23 @@ impl App {
     /// [`SpawnSession::cwd_from`](tumu::Action::SpawnSession)). The directory is
     /// read here, from the running child, and kept only for the spawn: the child
     /// owns its own location from then on and tumu never reads it again.
+    ///
+    /// A spawn that fails is reported rather than raised, as a message naming
+    /// the program that would not start and the cause. It is a `String` and not
+    /// the `io::Error` because that is what the error window shows: the error has
+    /// been resolved into something a reader can act on -- *which* program, and
+    /// *why* -- and the core only has to draw it.
     fn spawn_session(
         &mut self,
         index: usize,
         program: tumu::Program,
         cwd_from: Option<tumu::TermnixSessionId>,
-    ) -> std::io::Result<()> {
+    ) -> Result<(), String> {
+        // A sheet whose region cannot host a child is not a failure: the region
+        // is a consequence of the layout, which fixes itself on the next resize,
+        // so there is nothing to report and nothing to close. The sheet simply
+        // stays empty, exactly as a sheet too small to spawn into has always
+        // been.
         let Some(region) = self.state.content_region_of(index) else {
             return Ok(());
         };
@@ -828,23 +875,52 @@ impl App {
         // one join that turns the name into the path the child is handed, and
         // the path the file is removed by later.
         let mut editor_path = None;
+        // The program the sheet would run, resolved to the path behind it, so a
+        // failure can name it. `Program` is a *role* -- see `tumu::Program` -- so
+        // the path is only known here, where the recipe is chosen.
+        let name;
         let mut command = match &program {
-            tumu::Program::Shell => self.shell.command(),
-            tumu::Program::Editor { name } => {
-                let path = self.editor_dir.join(name);
+            tumu::Program::Shell => {
+                name = self.shell.program().display().to_string();
+                self.shell.command()
+            }
+            tumu::Program::Editor { name: file } => {
+                let path = self.editor_dir.join(file);
                 editor_path = Some(path.clone());
+                name = self.editor.program().display().to_string();
                 self.editor.command(&path)
             }
             // The tool sheets are plain recipes, like the shell: nothing about
             // the sheet is derived from the tool, so the command is the recipe
             // as it stands.
-            tumu::Program::Diff => self.diff.command(),
-            tumu::Program::Grep => self.grep.command(),
+            tumu::Program::Diff => {
+                name = self.diff.program().display().to_string();
+                self.diff.command()
+            }
+            tumu::Program::Grep => {
+                name = self.grep.program().display().to_string();
+                self.grep.command()
+            }
         };
         if let Some(dir) = &cwd {
             command.current_dir(dir);
         }
-        let session = termnix::Session::new(&mut command, size)?;
+        let session = match termnix::Session::new(&mut command, size) {
+            Ok(session) => session,
+            Err(err) => {
+                let message = format!("failed to start {name:?}: {err}");
+                // A failure to remove the editor's file is not this sheet's
+                // problem, so it is only noted. The file was written by the core
+                // naming it, before the spawn that failed, so it is left behind
+                // unless it is removed here.
+                if let Some(path) = editor_path
+                    && let Err(err) = std::fs::remove_file(&path)
+                {
+                    eprintln!("tumu: editor file {}: {err}", path.display());
+                }
+                return Err(message);
+            }
+        };
         let id = tumu::TermnixSessionId::new(self.next_session_id);
         self.next_session_id = std::num::NonZeroU64::new(self.next_session_id.get() + 1)
             .expect("an id past the last used is non-zero");
@@ -1186,11 +1262,18 @@ impl App {
         // A bottom-aligned window onto history-then-grid: as much of the tail of
         // the scrollback as fits in front, then the visible rows the window
         // keeps. Either `history_rows` or `visible_from` is zero, never both.
+        // The window asks for `history_rows` scrollback rows, but the session may
+        // not hold that many: a region taller than the grid *and* the whole
+        // history together still has empty lines at the top, which is drawn as
+        // blank rather than filled. So the tail taken is the smaller of what the
+        // window wants and what the history has -- taking `history_rows` from a
+        // shorter history would be the subtraction that overflows.
         let history = terminal.scrollback_lines();
+        let taken = window.history_rows.min(history.len());
         let mut rows: Vec<&[termnix::Cell]> =
-            Vec::with_capacity(window.history_rows + visible.len() - window.visible_from);
-        if window.history_rows > 0 {
-            for line in history.iter().skip(history.len() - window.history_rows) {
+            Vec::with_capacity(taken + visible.len() - window.visible_from);
+        if taken > 0 {
+            for line in history.iter().skip(history.len() - taken) {
                 rows.push(line.cells());
             }
         }

@@ -450,3 +450,70 @@ fn an_open_menu_is_closed_by_a_border_on_all_four_sides() {
         );
     }
 }
+
+#[test]
+fn the_error_window_is_closed_by_a_border_on_all_four_sides() {
+    // The window is a box like a menu: a top border, a bottom border, and a
+    // vertical line down each side. The bottom is checked as well as the top so a
+    // box a row short -- the bug the height arithmetic can have -- is caught.
+    let mut state = started(24, 40, VERTICAL);
+    state.error = Some("failed to start \"mamediff\": No such file or directory".to_string());
+    let layout = state.error_layout().expect("the window fits 24x40");
+    let frame = tumu::frame(&state, &no_grids());
+
+    // The box's interior row, as it lands on screen: the box is composed over
+    // the sheets, so a row is sliced to the box's columns before it is read.
+    let box_row = |row: usize| -> String {
+        let col = layout.region.position.col;
+        (col..col + layout.region.size.cols)
+            .map(|col| {
+                frame
+                    .chars()
+                    .find(|(p, _)| p.row == row && p.col == col)
+                    .map(|(_, ch)| ch.value())
+                    .unwrap_or(' ')
+            })
+            .collect()
+    };
+
+    let top = box_row(layout.region.position.row);
+    assert!(top.starts_with('┌'), "a top border: {top:?}");
+    assert!(top.ends_with('┐'), "the top border closes: {top:?}");
+
+    let last = layout.region.position.row + layout.region.size.rows - 1;
+    let bottom = box_row(last);
+    assert!(bottom.starts_with('└'), "a bottom border: {bottom:?}");
+    assert!(
+        bottom.ends_with('┘'),
+        "the bottom border closes: {bottom:?}"
+    );
+}
+
+#[test]
+fn the_error_window_paints_the_message_it_holds() {
+    // The message is split across the interior rows the layout names, so what
+    // the window shows and what the layout measured are the same text.
+    let mut state = started(24, 40, VERTICAL);
+    state.error = Some("failed to start\nnot found".to_string());
+    let layout = state.error_layout().expect("the window fits 24x40");
+    let frame = tumu::frame(&state, &no_grids());
+
+    for (offset, line) in layout.lines.iter().enumerate() {
+        let row = layout.region.position.row + 1 + offset;
+        // The message row is sliced to the box's columns, like a border row.
+        let col = layout.region.position.col;
+        let text: String = (col..col + layout.region.size.cols)
+            .map(|col| {
+                frame
+                    .chars()
+                    .find(|(p, _)| p.row == row && p.col == col)
+                    .map(|(_, ch)| ch.value())
+                    .unwrap_or(' ')
+            })
+            .collect();
+        assert!(
+            text.contains(line),
+            "interior row {offset} shows {line:?}: {text:?}"
+        );
+    }
+}

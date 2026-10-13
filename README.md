@@ -545,14 +545,41 @@ Only the left button moves the focus, and only a press at that. A click runs no
 command: the [menu](#menu) is opened by the prefix and chosen with a key, so a
 click on a menu row is a click on the sheet under the box.
 
+When a program will not start
+-----------------------------
+
+A sheet's child is spawned when the sheet is made, and a spawn can fail: a
+`$TUMU_EDITOR` that is missing or does not accept `--tail`, a `$TUMU_MAMEDIFF` /
+`$TUMU_MAMEGREP` that is not installed, a `$SHELL` that points at nothing, a
+program the user may not execute. The failure is not a reason to end the run.
+
+What tumu does instead:
+
+- The sheet that could not start is **closed**. It never held a session -- the
+  spawn is what would have made one -- so it is removed like a sheet whose child
+  exited, and the sheets under it re-derive their regions. No empty sheet is left
+  behind for the user to find and close.
+- The reason is shown in an **error window**: a box centred on the terminal, the
+  same shape the menu is, naming the program that would not start and the cause
+  (`failed to start "mamediff": No such file or directory`).
+
+The window is *modal*: any key press or a click dismisses it and does nothing
+else, so an acknowledgement can never fall through to a command or a sheet. Every
+other sheet keeps working throughout -- only the one sheet that could not start
+is gone.
+
+A launch failure at startup is shown too: when the very first sheet's shell
+cannot be started there is no session to fall back on, so tumu stays up with the
+window alone until the key that acknowledges it, and only then -- the stack empty
+and the window gone -- does the run end.
+
+A failed spawn that could not even be attempted -- a sheet whose region is too
+small to give the child a cell -- is not a failure and shows no window: the
+layout is what is wrong there, and the next resize fixes it.
+
 Known issues
 ------------
 
-- A sheet whose program fails to launch -- a `$TUMU_EDITOR` that is missing or
-  does not accept `--tail`, or a `$TUMU_MAMEDIFF` / `$TUMU_MAMEGREP` that is not
-  installed -- stays in the stack as an empty sheet and cannot be closed by
-  typing to it, because it has no child to type to. It is closed like any other
-  sheet, with `prefix x` then `k`.
 - Only the *focused* sheet's reports are forwarded. A background sheet gets
   nothing while it is not focused -- the same as the keyboard -- even if its
   child asked for the mouse, so a tracking program in a background sheet does not

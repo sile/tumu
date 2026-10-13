@@ -301,6 +301,15 @@ pub fn frame(state: &State, contents: &SheetGrids) -> tuinix::Frame {
         screen.put_frame(layout.region.position, &menu_frame(&layout));
     }
 
+    // The error window is painted last of all, over everything including the
+    // menus: it is modal, so while it is up no key reaches the prefix and no
+    // menu can be open at the same time. It lives outside the layout the same
+    // way the menu does, which is why it is composed here rather than by
+    // `regions()`.
+    if let Some(layout) = state.error_layout() {
+        screen.put_frame(layout.region.position, &error_frame(&layout));
+    }
+
     screen
 }
 
@@ -488,6 +497,57 @@ pub fn menu_frame(layout: &crate::MenuLayout) -> tuinix::Frame {
     // The bottom border goes on last: a content row is as wide as the interior,
     // so it can never reach the border row, but writing the border after them
     // leaves no ordering in which one row could erase it.
+    put_line(layout.region.size.rows - 1, &border('└', '┘'));
+
+    frame
+}
+
+/// Paints an error window into a fresh frame the size of the box.
+///
+/// The box is drawn where [`ErrorLayout`](crate::ErrorLayout) says: a top border,
+/// one row per line of the message, and a bottom border. The lines are already
+/// wrapped to the interior width by the layout, so each one is written as it
+/// stands, left-aligned after the padding. The frame is the size of the box, so
+/// the renderer composes it over the sheet frames exactly as it composes a
+/// menu.
+///
+/// It is a box rather than a bare message so the failure reads as tumu's own
+/// note -- the same chrome the menu has -- rather than as output of a sheet
+/// underneath it.
+pub fn error_frame(layout: &crate::ErrorLayout) -> tuinix::Frame {
+    let mut frame = tuinix::Frame::new(layout.region.size);
+    let width = layout.region.size.cols;
+
+    // Writes `text` at the start of row `row`, one character per cell.
+    let mut put_line = |row: usize, text: &str| {
+        let mut position = tuinix::Position { row, col: 0 };
+        for ch in text.chars() {
+            if let Some(cell) = tuinix::Char::new(ch, 1, tuinix::Style::RESET) {
+                position = frame.put_char(position, cell);
+            }
+        }
+    };
+
+    let inner_width = width.saturating_sub(2);
+    let border = |left_corner: char, right_corner: char| {
+        let mut line = String::new();
+        line.push(left_corner);
+        for _ in 0..inner_width {
+            line.push(BORDER_RULE);
+        }
+        line.push(right_corner);
+        line
+    };
+    put_line(0, &border('┌', '┐'));
+
+    // A content row: the padding, the line, and the room left over. The line is
+    // already wrapped to the interior, so it can never reach the border column;
+    // the padding is what keeps it off the box's edge. The top and bottom border
+    // rows are the layout's first and last, so the lines start one row down.
+    for (offset, text) in layout.lines.iter().enumerate() {
+        put_line(offset + 1, &format!("│ {text}"));
+    }
+
     put_line(layout.region.size.rows - 1, &border('└', '┘'));
 
     frame

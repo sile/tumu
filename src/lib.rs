@@ -21,6 +21,7 @@
 
 mod action;
 mod command;
+mod error;
 mod event;
 mod geometry;
 mod id;
@@ -36,6 +37,7 @@ mod state;
 
 pub use action::{Action, Program};
 pub use command::Command;
+pub use error::{ErrorLayout, error_layout};
 pub use event::Event;
 pub use geometry::{
     cell_size_to_terminal_size, region_extent, screen_position_to_grid, split_region,
@@ -57,7 +59,7 @@ pub use ratio::{
     DEFAULT_NUM as DEFAULT_RATIO_NUM, MAX_NUM as MAX_RATIO_NUM, MIN_NUM as MIN_RATIO_NUM, Ratio,
 };
 pub use render::{
-    SheetGrid, SheetGrids, draw_sheet_grid, frame, menu_frame, sheet_content_origin,
+    SheetGrid, SheetGrids, draw_sheet_grid, error_frame, frame, menu_frame, sheet_content_origin,
     sheet_content_size, sheet_frame,
 };
 pub use scrollback::{DEFAULT_CELLS, DEFAULT_LINES, ScrollbackLimit};

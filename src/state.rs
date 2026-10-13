@@ -90,6 +90,24 @@ pub struct State {
     /// and it is painted over the composed screen like the prefix menu.
     pub ext_menu: bool,
 
+    /// The message of the last program that failed to launch, if its window is
+    /// still up.
+    ///
+    /// It is `None` while no window is shown. When a sheet's program fails to
+    /// start -- [`Event::SessionFailed`](crate::Event::SessionFailed) -- the
+    /// failed sheet is closed and its message is stored here, and the renderer
+    /// paints it in a box over the sheets. It is *modal*: the next key or click
+    /// dismisses it and does nothing else, so an acknowledgement can never fall
+    /// through to a command, and a stray press costs a dismissal rather than a
+    /// sheet.
+    ///
+    /// It holds the message, not the sheet: the failed sheet is gone by the time
+    /// this is shown -- there is nothing to type to and nothing to focus -- so
+    /// the window is only ever a note to the reader. A failure that arrives
+    /// while a window is already up replaces it: the newest is the one that
+    /// still has an explanation the user has not seen.
+    pub error: Option<String>,
+
     /// Whether the focused sheet's child is asking for the mouse.
     ///
     /// It is *the focused sheet's* ask, not a per-session fact, because the mouse
@@ -152,6 +170,7 @@ impl State {
             orientation: crate::Orientation::DEFAULT,
             menu: false,
             ext_menu: false,
+            error: None,
             mouse_wanted: false,
             held_button: None,
             full_screen: false,
@@ -242,6 +261,19 @@ impl State {
         crate::ext_menu_layout(self.size)
     }
 
+    /// Returns the error window's layout at the current size, or `None` when it
+    /// is not shown or does not fit.
+    ///
+    /// The window's geometry is derived from the stored message and the size,
+    /// the same way the menus' is; the renderer reads it to paint the box. When
+    /// the box does not fit the layout is `None`, so the window is skipped rather
+    /// than shown clipped -- and since it is modal, a message that cannot be
+    /// drawn is still dismissed by the next key, which is the only thing the
+    /// window asks of the user.
+    pub fn error_layout(&self) -> Option<crate::ErrorLayout> {
+        crate::error_layout(self.size, self.error.as_deref()?)
+    }
+
     /// Returns the index of the focused sheet, or `None` when there is none.
     ///
     /// The stack search is what keeps focus honest: a focus that names a sheet
@@ -299,6 +331,7 @@ impl State {
             Event::Resize(size) => self.handle_resize(size),
             Event::TitleChanged { index, title } => self.handle_title_changed(index, title),
             Event::SessionExited(id) => self.handle_session_exited(id),
+            Event::SessionFailed { index, message } => self.handle_session_failed(index, message),
         }
     }
 
@@ -397,6 +430,15 @@ impl State {
     /// from under the view. Reusing `Stack::hit_test` would test the unfolded
     /// layout and do exactly that.
     fn handle_mouse(&mut self, mouse: tuinix::MouseInput) -> Vec<Action> {
+        // The error window is modal for the pointer too: while it is up a click
+        // dismisses it and goes no further, so it cannot also move the focus to a
+        // sheet under the box. A key is the other dismissal; the *click* is here
+        // so the window obeys both the hands a user has.
+        if self.error.is_some() {
+            self.error = None;
+            return Vec::new();
+        }
+
         // The focused child's report is one that lands in its region, or any
         // report at all once it has a button held from such a report: a drag may
         // leave the region and has to keep going to the child that saw its press.
@@ -548,6 +590,18 @@ impl State {
     /// what the next key means are never out of step. A forwarded key is dropped
     /// when the stack is empty, rather than sent to nowhere.
     fn handle_key(&mut self, key: tuinix::KeyInput) -> Vec<Action> {
+        // The error window is the most modal thing there is: while it is up the
+        // one key that does anything is the key that dismisses it, and that key
+        // does nothing else. It is checked before the extended menu so an
+        // acknowledgement can never be read as a chord, and so the prefix stays
+        // inert. The key is swallowed -- not forwarded on the way out -- because
+        // the point of the window is to be read, and a press that closed it while
+        // also reaching a child would make the dismissal itself a command.
+        if self.error.is_some() {
+            self.error = None;
+            return Vec::new();
+        }
+
         // The extended menu is modal and is checked first, so while it is open
         // the prefix is inert and the chord table is the menu's own. One key
         // closes it, whatever the key is: a command the menu names runs, and any
@@ -1096,6 +1150,46 @@ impl State {
         // No `CloseSession` is returned: the child is already gone -- this event
         // is how the edge reports that -- so there is no session left to close.
         // The sheet is all that had to go.
+        let mut actions = Vec::new();
+        actions.extend(self.resize_actions());
+        actions
+    }
+
+    /// Closes the sheet whose program failed to launch, and shows the message.
+    ///
+    /// This is the counterpart of [`handle_session_exited`](State::handle_session_exited)
+    /// for a child that never started: there is no session to close, but the
+    /// sheet that was pushed for it has to go, or it would sit in the stack as an
+    /// empty sheet no key could reach -- the failure the README used to warn
+    /// about. Removing it re-derives every other sheet's region, which is why the
+    /// resize actions are returned exactly as for an exit.
+    ///
+    /// The message is kept so the renderer can show it, and it is the *only*
+    /// trace the failure leaves: nothing is written to the terminal outside the
+    /// frame, so a failure the user never reads -- a box too large for the
+    /// screen, say -- is still not a reason to end the run.
+    ///
+    /// The sheet is named by `index`, not by id, because there is no session to
+    /// name it by: the spawn that failed never made one. That is safe here and
+    /// not for a session close, because the edge reports the failure in the same
+    /// turn it tried the spawn -- no other event has had a chance to reorder the
+    /// stack -- so the index still names the sheet that was pushed for it. When
+    /// the index names no sheet (an empty stack, which a failed spawn cannot
+    /// leave) there is nothing to remove and only the message is kept.
+    fn handle_session_failed(&mut self, index: usize, message: String) -> Vec<Action> {
+        let was_focused = self
+            .stack
+            .sheets()
+            .get(index)
+            .is_some_and(|(id, _)| self.focused == Some(*id));
+        self.stack.remove(index);
+        if was_focused {
+            self.focused = successor(self.stack.sheets(), index);
+            // A full-screen sheet whose spawn failed would leave nothing to
+            // show, so the flag clears rather than zoom the sheet below it.
+            self.full_screen = false;
+        }
+        self.error = Some(message);
         let mut actions = Vec::new();
         actions.extend(self.resize_actions());
         actions

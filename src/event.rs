@@ -81,4 +81,26 @@ pub enum Event {
 
     /// The session hosted by the given sheet exited.
     SessionExited(SheetId),
+
+    /// The program for the sheet at `index` failed to launch.
+    ///
+    /// The edge is the side that spawns a child, so a launch that fails -- a
+    /// `$TUMU_EDITOR` that is missing, a `$TUMU_MAMEDIFF` that is not installed,
+    /// a permission that denies the exec -- is only observable there. It is
+    /// reported rather than raised: a sheet that cannot start must not end the
+    /// run, so the failure travels to the core, which closes the sheet and puts
+    /// [`message`](Event::SessionFailed::message) in the error window.
+    ///
+    /// It is separate from [`SessionExited`](Event::SessionExited) because the
+    /// two are different facts: a child that ran and stopped has a session to
+    /// reap, while one that never started has none, so its sheet has to be
+    /// removed without a session to close.
+    SessionFailed {
+        /// The sheet whose program could not be started.
+        index: usize,
+
+        /// What to tell the user, already phrased for the window: the program
+        /// that failed and the cause, as one message the core only has to draw.
+        message: String,
+    },
 }
