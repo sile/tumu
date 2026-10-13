@@ -1227,7 +1227,7 @@ impl App {
     }
 
     /// Returns the text of the sheet's scrollback: history first, then the rows
-    /// still on screen.
+    /// still on screen that hold something.
     ///
     /// The two halves come from the same emulator but are laid out
     /// differently: a retained [`termnix::ScrollbackLine`] keeps the width it
@@ -1236,6 +1236,19 @@ impl App {
     /// left to right, trailing blanks trimmed, rows joined by newlines -- and a
     /// width-0 cell (the trailing half of a wide glyph) contributes nothing of
     /// its own.
+    ///
+    /// The two halves are cut differently, because no two rows of them mean the
+    /// same thing by being blank. Every row of the history is content that was
+    /// scrolled off, so a blank one is a blank line the child really wrote and
+    /// is kept. The visible grid is instead a fixed-size buffer: everything
+    /// below the last row the child wrote is padding, and emitting it would
+    /// append a screenful of blank lines to every history. So the grid is cut
+    /// after its last row that holds anything.
+    ///
+    /// The cut is the last non-blank row and not the cursor row: a reader of
+    /// the history is after the output, and where the cursor ended up -- one
+    /// blank line below the last output, as often as not -- says nothing about
+    /// it.
     ///
     /// This is what `prefix l` writes out. It lives on the *edge* rather than in
     /// the core because reading it needs the session, which only the edge holds;
@@ -1251,9 +1264,12 @@ impl App {
         for line in terminal.scrollback_lines() {
             rows.push(row_text(line.cells()));
         }
-        for row in terminal.rows() {
+
+        let visible: Vec<&[termnix::Cell]> = terminal.rows().collect();
+        for row in &visible[..written_rows(&visible)] {
             rows.push(row_text(row));
         }
+
         Some(rows.join("\n"))
     }
 }
@@ -1300,6 +1316,37 @@ impl ContentWindow {
     fn painted_offset(&self) -> i64 {
         self.history_rows as i64 - self.visible_from as i64
     }
+}
+
+/// Returns how many of a grid's rows hold the child's output.
+///
+/// The grid is `Size::rows` tall whether or not the child filled it, so the
+/// rows below the last one the child wrote are the buffer's padding rather
+/// than its output, and emitting them would append a screenful of blank lines
+/// to every history. This is the index just past the last row that holds
+/// something, so `rows[..written]` is the content and `rows[written..]` is the
+/// padding; a grid whose rows are all blank gives `0`.
+///
+/// The cut follows the last row that holds something, not the cursor: a reader
+/// of the history is after the output, and where the cursor ended up -- one
+/// blank line below the last output, as often as not -- says nothing about it.
+fn written_rows(rows: &[&[termnix::Cell]]) -> usize {
+    rows.iter()
+        .rposition(|row| !is_blank_row(row))
+        .map_or(0, |row| row + 1)
+}
+
+/// Returns whether a row holds nothing: every cell blank, or a width-0 cell
+/// (the trailing half of a wide glyph, which stands for no character itself).
+///
+/// This is the test [`row_text`] would make anyway -- a row of blanks renders
+/// as the empty string -- but asking it of the cells keeps the question
+/// separate from the rendering, which [`scrollback_text`] needs when it cuts
+/// the grid's padding away.
+fn is_blank_row(cells: &[termnix::Cell]) -> bool {
+    cells
+        .iter()
+        .all(|cell| cell.width == 0 || cell.ch.is_whitespace())
 }
 
 /// Renders one row of cells as text, trailing blanks trimmed.
@@ -1391,6 +1438,48 @@ mod tests {
     fn row_text_of_all_blanks_is_empty() {
         let cells = [cell(' ', 1), cell(' ', 1)];
         assert_eq!(row_text(&cells), "");
+    }
+
+    #[test]
+    fn written_rows_stops_after_the_last_row_holding_something() {
+        // A grid with a screenful of padding after its output: only the rows
+        // down to the last one the child wrote are the child's.
+        let rows: [&[termnix::Cell]; 4] = [
+            &[cell('h', 1)],
+            &[cell('i', 1)],
+            &[cell(' ', 1)],
+            &[cell(' ', 1)],
+        ];
+        assert_eq!(written_rows(&rows), 2);
+    }
+
+    #[test]
+    fn written_rows_counts_a_trailing_blank_the_child_wrote_as_content() {
+        // The blank row *between* two rows of output is content -- the child
+        // moved the cursor past it -- so it is inside the cut, not padding.
+        let rows: [&[termnix::Cell]; 3] = [&[cell('a', 1)], &[cell(' ', 1)], &[cell('b', 1)]];
+        assert_eq!(written_rows(&rows), 3);
+    }
+
+    #[test]
+    fn written_rows_ignores_the_trailing_half_of_a_wide_glyph() {
+        // A width-0 cell stands for the right half of the glyph before it and
+        // for no character of its own, so a row made of nothing else is blank:
+        // it does not count as content, and so does not extend the cut.
+        let rows: [&[termnix::Cell]; 3] = [
+            &[cell('\0', 0), cell('\0', 0)],
+            &[cell('世', 2), cell('\0', 0)],
+            &[cell('\0', 0)],
+        ];
+        assert_eq!(written_rows(&rows), 2);
+    }
+
+    #[test]
+    fn written_rows_of_an_untouched_grid_is_zero() {
+        // A sheet whose child has written nothing must not contribute a blank
+        // screenful to the history.
+        let rows: [&[termnix::Cell]; 3] = [&[cell(' ', 1)], &[cell(' ', 1)], &[cell(' ', 1)]];
+        assert_eq!(written_rows(&rows), 0);
     }
 
     #[test]

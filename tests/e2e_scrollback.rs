@@ -178,6 +178,59 @@ fn the_editor_file_holds_history_and_visible_rows_without_trailing_blanks() {
     }
 }
 
+/// Prints two markers near the top of the screen, then leaves the cursor far
+/// below them without writing anything else.
+///
+/// The grid keeps its height whether or not the child filled it, so after this
+/// the sheet's visible rows are two lines of output followed by a screenful of
+/// padding. That padding is what must not reach the history file.
+///
+/// The screen is *not* cleared to make the padding: a clear scrolls the output
+/// into history, and the blank rows it leaves there are the child's own rows
+/// (they are history, not padding) -- a different matter from this test.
+fn padded_shell() -> String {
+    "printf 'PAD-FIRST\\nPAD-SECOND\\n'; printf '\\033[24;1H'; exec sleep 30".to_string()
+}
+
+#[test]
+fn the_editor_file_does_not_end_with_the_grid_padding() {
+    // The sheet shows two lines of output and fills the rest of its grid with
+    // blanks. Those blanks are the buffer's padding, not the child's output, so
+    // the file must end at the second marker -- not carry a screenful of empty
+    // lines after it.
+    let shell = script("pad-shell", &padded_shell());
+    let out = out_path("pad");
+    let editor = script("pad-editor", &copy_editor(&out));
+
+    let mut tumu = e2e::TumuHarness::with_args(24, 80, {
+        let shell = shell.to_str().expect("utf-8 path").to_string();
+        let editor = editor.to_str().expect("utf-8 path").to_string();
+        move |command| {
+            command.env("SHELL", &shell);
+            command.env("TUMU_EDITOR", &editor);
+        }
+    });
+    tumu.wait_for_text("PAD-SECOND");
+
+    let text = hand_off_scrollback(&mut tumu, &out);
+
+    assert!(
+        text.contains("PAD-SECOND"),
+        "the sheet's output must be in the file:\n{text:?}"
+    );
+    assert!(
+        !text.ends_with('\n'),
+        "the file must not end with the grid's padding:\n{text:?}"
+    );
+    // The file is the two markers and nothing else: no blank line after them.
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(
+        lines,
+        vec!["PAD-FIRST", "PAD-SECOND"],
+        "the file must hold only the child's output:\n{text:?}"
+    );
+}
+
 /// Runs `prefix l` and returns the text the editor received.
 ///
 /// The editor copies the file it was opened on to `out`; the test waits for the
