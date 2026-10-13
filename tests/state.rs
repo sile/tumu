@@ -1678,6 +1678,98 @@ fn the_wheel_is_forwarded_but_never_held() {
 }
 
 #[test]
+fn the_wheel_goes_to_the_focused_sheet_from_outside_its_region() {
+    // Two 40-column sheets; focus the left one, then turn the wheel over the
+    // *right* one. A pager scrolls by the line and does not read the cell the
+    // pointer was over, so the turn is still the focused sheet's -- and routing
+    // it by region would drop it, because the pointer is not on that sheet.
+    let mut state = state_with(24, 80, 2);
+    state.update(tumu::Event::MouseWanted(true));
+    let left = state.stack.sheets()[0].0;
+    state.update(tumu::Event::Mouse(click(5, 10)));
+    assert_eq!(state.focused, Some(left), "the left sheet is focused");
+
+    let actions = state.update(tumu::Event::Mouse(mouse(
+        tuinix::MouseInputKind::ScrollDown,
+        5,
+        60,
+    )));
+
+    assert!(
+        matches!(
+            actions.as_slice(),
+            [tumu::Action::SendMouseToFocused {
+                index: 0,
+                held: None,
+                ..
+            }]
+        ),
+        "the wheel reaches the focused sheet from outside it: {actions:?}"
+    );
+}
+
+#[test]
+fn the_wheel_over_another_sheet_does_not_move_the_focus() {
+    // The same turn as the test above, asserted on the focus: the pointer says
+    // where the turn happened, not which sheet the user wants next, and a
+    // scroll that moved the focus would move the sheet out from under the
+    // reader.
+    let mut state = state_with(24, 80, 2);
+    state.update(tumu::Event::MouseWanted(true));
+    let left = state.stack.sheets()[0].0;
+    state.update(tumu::Event::Mouse(click(5, 10)));
+
+    state.update(tumu::Event::Mouse(mouse(
+        tuinix::MouseInputKind::ScrollUp,
+        5,
+        60,
+    )));
+
+    assert_eq!(state.focused, Some(left), "the wheel moved the focus");
+}
+
+#[test]
+fn the_wheel_past_every_sheet_still_reaches_the_focused_one() {
+    // A turn on the terminal's last row, below both sheets, is outside every
+    // region; the wheel still belongs to the focused sheet.
+    let mut state = state_with(24, 80, 2);
+    state.update(tumu::Event::MouseWanted(true));
+
+    let actions = state.update(tumu::Event::Mouse(mouse(
+        tuinix::MouseInputKind::ScrollDown,
+        24,
+        0,
+    )));
+
+    assert!(
+        matches!(
+            actions.as_slice(),
+            [tumu::Action::SendMouseToFocused { index: 0, .. }]
+        ),
+        "a turn past every sheet still goes to the focused one: {actions:?}"
+    );
+}
+
+#[test]
+fn the_wheel_with_nothing_asking_is_dropped() {
+    // The exception the wheel gets is only to the *region* test: a report of
+    // any kind still needs a child that asked for the mouse, and tumu has no
+    // command behind the wheel to fall back on.
+    let mut state = state_with(24, 80, 2);
+    assert!(!state.mouse_wanted());
+    let focused = state.focused;
+
+    let actions = state.update(tumu::Event::Mouse(mouse(
+        tuinix::MouseInputKind::ScrollUp,
+        5,
+        10,
+    )));
+
+    assert!(actions.is_empty(), "nothing is forwarded: {actions:?}");
+    assert_eq!(state.focused, focused, "the wheel must not move the focus");
+}
+
+#[test]
 fn with_no_child_asking_a_report_still_only_moves_the_focus() {
     // The default, restated as the pair of the first test: with nothing asking,
     // every report takes the focus path and none is forwarded.

@@ -324,6 +324,25 @@ impl State {
     /// child already saw: a held button keeps the report, wherever it lands, so
     /// a drag that starts in the region and leaves it is still the child's.
     ///
+    /// The wheel is the other exception, and a wider one: a turn goes to the
+    /// focused sheet's child wherever on the screen it happens, inside the
+    /// region or not. A wheel has no position in the child's world -- the
+    /// protocols carry a cell, but a pager scrolls by a line and does not read
+    /// which cell the pointer was over -- so clipping the position into the grid
+    /// and handing it on is all the routing there is. Making the wheel instead
+    /// follow the region test would mean a turn over another sheet's border (or
+    /// over a sheet that is not focused but is under the pointer) went nowhere,
+    /// and the wheel would stop working whenever the pointer drifted off the
+    /// focused sheet -- which, on a small screen, is most of the time. The wheel
+    /// does *not* move the focus: the pointer says where the turn happened, not
+    /// which sheet the user wants next, and a scroll that changed focus would
+    /// move the sheet out from under the reader.
+    ///
+    /// Both exceptions need a child that asked for the mouse; a turn with
+    /// nothing asking is dropped, like every other report. There is no tumu
+    /// command behind the wheel today, so a turn with no asker is nothing to do
+    /// rather than something to interpret.
+    ///
     /// Inside the region, a report is forwarded to the *focused* sheet: the
     /// keyboard's rule, and the only one that makes sense for a child, since the
     /// pointer it sees is its own and a sheet that is not focused has no child
@@ -346,12 +365,18 @@ impl State {
     /// from under the view. Reusing `Stack::hit_test` would test the unfolded
     /// layout and do exactly that.
     fn handle_mouse(&mut self, mouse: tuinix::MouseInput) -> Vec<Action> {
-        // The focused child's report is the one that lands in its region, or any
+        // The focused child's report is one that lands in its region, or any
         // report at all once it has a button held from such a report: a drag may
         // leave the region and has to keep going to the child that saw its press.
-        if self.mouse_wanted
-            && (self.held_button.is_some() || self.lands_on_focused_region(mouse.position))
-        {
+        let lands_here = self.held_button.is_some() || self.lands_on_focused_region(mouse.position);
+        // The wheel is the exception -- it goes to the focused sheet wherever it
+        // is turned, region or not -- so it is answered before that test and not
+        // by it. See the method's doc comment for why.
+        let is_wheel = matches!(
+            mouse.kind,
+            tuinix::MouseInputKind::ScrollUp | tuinix::MouseInputKind::ScrollDown
+        );
+        if self.mouse_wanted && (is_wheel || lands_here) {
             return self.forward_mouse(mouse);
         }
         if mouse.kind != tuinix::MouseInputKind::LeftPress {

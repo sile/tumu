@@ -16,7 +16,7 @@ tumu
   - Split odds set by `--ratio`, moved at run time with `prefix +` / `prefix -`
   - No server (a standalone process)
   - Mouse: click a sheet to focus it; a sheet's program gets the mouse when it
-  asks for it
+  asks for it, and the wheel always goes to the focused sheet
   - tmux like copy-mode (PoC)
   - Bounded scrollback, set by `--scrollback` or `$TUMU_SCROLLBACK`
   - Prefix key character, set by `--prefix` or `$TUMU_PREFIX`
@@ -494,6 +494,18 @@ host terminal's mouse reporting never changes -- what changes is what tumu does
 with a report. The switch is read from the *focused* sheet, because the mouse
 follows the focus the way the keyboard does: there is one pointer and one focused
 sheet.
+
+The **wheel** is the one report that ignores the region: a turn goes to the
+focused sheet's child wherever on the screen it happens. A wheel has no position
+in the child's world -- a pager scrolls by the line and does not read which cell
+the pointer was over -- so clipping the position into the grid and handing it on
+is all the routing there is. Routing it by region instead would drop a turn
+whenever the pointer was not on the focused sheet, which on a small screen is
+most of the time, and the wheel would stop working. A turn moves no focus: the
+pointer says where the turn happened, not which sheet the user wants next, and a
+scroll that moved the focus would move the sheet out from under the reader. A
+turn with no child asking is dropped, like every other report -- there is no
+tumu command behind the wheel.
 
 Dragging works: tumu remembers which button it forwarded a press for, so a drag
 names the button the child is holding. A drag that began on a tracking child keeps

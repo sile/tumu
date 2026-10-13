@@ -271,6 +271,109 @@ fn script_without_ask(name: &str) -> PathBuf {
     path
 }
 
+/// Writes a shell script that asks for the mouse and echoes back every report
+/// it receives, one per line.
+///
+/// Unlike [`mouse_asking_shell`], which reads a single report, this keeps
+/// reading: a test can send a press and a wheel turn and see both, in order.
+fn mouse_echoing_shell(name: &str) -> PathBuf {
+    let path = std::env::temp_dir().join(format!(
+        "tumu-mouse-echo-{}-{}.sh",
+        std::process::id(),
+        name
+    ));
+    let body = concat!(
+        "#!/bin/sh\n",
+        "printf '\\033[?1000h\\033[?1006h'\n",
+        "printf 'MOUSE-ASKED\\n'\n",
+        "while IFS= read -r line; do\n",
+        "  printf '%s\\n' \"$line\" | od -An -c\n",
+        "done\n",
+        "exec sleep 30\n",
+    );
+    fs::write(&path, body).expect("failed to write the test script");
+    let mut perms = fs::metadata(&path).expect("stat the script").permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+    fs::set_permissions(&path, perms).expect("chmod the script");
+    path
+}
+
+#[test]
+fn the_wheel_reaches_the_focused_child_from_another_sheets_region() {
+    // The top sheet runs a program that tracks the mouse; the bottom one does
+    // not. A wheel turn over the *bottom* sheet must still reach the tracking
+    // child in the focused top sheet: a pager scrolls by the line, and routing
+    // the wheel by region would drop the turn whenever the pointer was not on
+    // the sheet the user is reading.
+    //
+    // SGR button code 65 is a wheel turn towards the user.
+    let shell = mouse_echoing_shell("wheel-elsewhere");
+    let mut tumu = e2e::TumuHarness::with_shell_and_orientation(
+        24,
+        80,
+        shell.to_str().expect("utf-8 path"),
+        "horizontal",
+    );
+    tumu.wait_for_column_text("[C-q ...]");
+    tumu.send_prefix();
+    tumu.send_char('c');
+    // The new top sheet runs the tracking script: wait for the focus to settle
+    // on it first, because the ask that matters is the *focused* child's and the
+    // one on screen before the split belongs to the sheet it came from.
+    wait_for_focus(&mut tumu, true);
+    tumu.wait_for_text("MOUSE-ASKED");
+
+    // Turn the wheel over the *lower* sheet, which is not the focused one.
+    tumu.send_mouse_code(65, 5, LOWER_SHEET_COL);
+
+    // The focused child reads it. The report names column 39, not the 60 the
+    // turn happened on: the position is clipped into the focused sheet's grid
+    // (columns 1..=40, one-based on the wire) before the child sees it, because
+    // a position outside the child's own grid has no coordinates in the
+    // protocol. Row 5 becomes 6, SGR's rows being one-based.
+    tumu.wait_until("the focused child sees the wheel", |h| {
+        h.screen_text().contains("<65;39;6M")
+    });
+}
+
+#[test]
+fn a_wheel_turn_does_not_move_the_focus() {
+    // A turn over the lower sheet, while the upper sheet is focused and asking:
+    // the focus must stay put, or the sheet the reader is on would slide away
+    // under a scroll.
+    let shell = mouse_echoing_shell("wheel-no-focus");
+    let mut tumu = e2e::TumuHarness::with_shell_and_orientation(
+        24,
+        80,
+        shell.to_str().expect("utf-8 path"),
+        "horizontal",
+    );
+    tumu.wait_for_column_text("[C-q ...]");
+    tumu.send_prefix();
+    tumu.send_char('c');
+    wait_for_focus(&mut tumu, true);
+    tumu.wait_for_text("MOUSE-ASKED");
+
+    tumu.send_mouse_code(65, 5, LOWER_SHEET_COL);
+
+    // The label is still on the upper sheet's border: the turn reached the
+    // child (clipped into its grid) and left the focus where it was.
+    tumu.wait_until("the wheel reaches the child", |h| {
+        h.screen_text().contains("<65;39;6M")
+    });
+    assert!(
+        tumu.screen_column(UPPER_BORDER_COL)
+            .starts_with("└ [C-q ...]"),
+        "the wheel moved the focus:\n{}",
+        tumu.screen_text()
+    );
+    assert!(
+        tumu.screen_column(LOWER_BORDER_COL).starts_with("└─"),
+        "the lower sheet took the focus:\n{}",
+        tumu.screen_text()
+    );
+}
+
 #[test]
 fn a_click_outside_a_mouse_tracking_child_still_moves_focus() {
     // The upper sheet runs a program that tracks the mouse; the lower one does
