@@ -338,10 +338,22 @@ impl State {
     /// which sheet the user wants next, and a scroll that changed focus would
     /// move the sheet out from under the reader.
     ///
-    /// Both exceptions need a child that asked for the mouse; a turn with
-    /// nothing asking is dropped, like every other report. There is no tumu
-    /// command behind the wheel today, so a turn with no asker is nothing to do
-    /// rather than something to interpret.
+    /// Both exceptions need a child that asked for the mouse, with one
+    /// exception of the wheel's own: a child that has *not* asked turns a scroll
+    /// **down** into copy mode. That is the other half of the wheel's job -- with
+    /// a pager under the keyboard, a turn pages the pager; with nothing asking,
+    /// there is nothing to page, and the natural reading of "scroll down past
+    /// the bottom" is "show me the history", which is what `prefix l` does. The
+    /// key and the wheel are two doors into the same room: `prefix l` is the one
+    /// that is always there, the wheel is the one a hand reaches for without
+    /// leaving the pointer. Only *down* opens it -- up has no such reading (there
+    /// is no "above the top" to go to), so it is dropped like any other report
+    /// with nothing behind it.
+    ///
+    /// A turn with nothing asking and no copy mode to enter -- up, or with no
+    /// sheet to read -- is dropped, like every other report. The wheel has no
+    /// command of its own beyond this: it either reaches a child or opens the
+    /// history, and a turn that does neither is nothing to interpret.
     ///
     /// Inside the region, a report is forwarded to the *focused* sheet: the
     /// keyboard's rule, and the only one that makes sense for a child, since the
@@ -378,6 +390,14 @@ impl State {
         );
         if self.mouse_wanted && (is_wheel || lands_here) {
             return self.forward_mouse(mouse);
+        }
+        // With nothing asking, a scroll down is the copy-mode door: it opens the
+        // focused sheet's history in an editor sheet, exactly as `prefix l` does.
+        // Only down -- see the method's doc comment for why. It is answered
+        // before the press test because it is the one wheel turn that *is* a
+        // command, and the press test would otherwise drop it.
+        if !self.mouse_wanted && mouse.kind == tuinix::MouseInputKind::ScrollDown {
+            return self.handle_edit_scrollback();
         }
         if mouse.kind != tuinix::MouseInputKind::LeftPress {
             return Vec::new();

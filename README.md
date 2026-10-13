@@ -17,7 +17,8 @@ tumu
   - No server (a standalone process)
   - Mouse: click a sheet to focus it; a sheet's program gets the mouse when it
   asks for it, and the wheel always goes to the focused sheet
-  - tmux like copy-mode (PoC)
+  - tmux like copy-mode (PoC): `prefix l`, or a scroll down when the sheet's
+  program is not using the mouse
   - Bounded scrollback, set by `--scrollback` or `$TUMU_SCROLLBACK`
   - Prefix key character, set by `--prefix` or `$TUMU_PREFIX`
 
@@ -341,13 +342,27 @@ will not open.
 Copy mode (PoC)
 ---------------
 
-`prefix l` is the first step of a tmux-like copy mode, kept simple for now: the
-focused sheet's scrollback -- the history the emulator has pushed off the top,
-followed by the rows still on screen -- is joined into text and opened in an
-external editor. The editor runs in a **sheet of its own**, pushed on top like
-any new sheet: tumu writes the text to a temporary file and spawns the editor
-as that sheet's session, so the editor is painted like any other child and the
-editor's exit closes its sheet through the ordinary session-exit path.
+The focused sheet's scrollback -- the history the emulator has pushed off the
+top, followed by the rows still on screen -- is joined into text and opened in
+an external editor. The editor runs in a **sheet of its own**, pushed on top
+like any new sheet: tumu writes the text to a temporary file and spawns the
+editor as that sheet's session, so the editor is painted like any other child
+and the editor's exit closes its sheet through the ordinary session-exit path.
+
+There are two doors into it, and they open onto the same room:
+
+- `prefix l` -- the key one, always there.
+- a **scroll down** (a wheel turn towards the user), when the focused sheet's
+  child has not asked for the mouse -- the one a hand reaches for without
+  leaving the pointer.
+
+A wheel turn is only tumu's when the child did not ask for the mouse (see
+[Mouse](#mouse)): a pager that wanted the mouse pages on the turn, and the
+history is not opened on top of it. When nothing is asking there is nothing to
+page, and "scroll down past the bottom" reads as "show me the history", which
+is the editor sheet. Only *down* opens it -- an up turn has no such reading
+(there is no "above the top" to go to), so it is dropped like any other report
+with nothing behind it.
 
 Nothing is handed over. The terminal driver stays up, so the frames of the
 other sheets keep their meaning and the screen is never repainted from scratch.
@@ -364,9 +379,9 @@ editor for now.
 
 A sheet's scrollback is bounded, because the emulator keeps none of its own.
 Each session is trimmed to a line limit as it runs, so a sheet that prints for
-days does not grow without end, and the file `prefix l` opens in the editor is
-only as long as the bound allows. The default is 1000 lines; the earliest lines
-are dropped first, so the newest history always survives.
+days does not grow without end, and the file the editor is opened on is only as
+long as the bound allows. The default is 1000 lines; the earliest lines are
+dropped first, so the newest history always survives.
 
 The bound can be set two ways, with the command line taking precedence over the
 environment:
@@ -503,9 +518,14 @@ is all the routing there is. Routing it by region instead would drop a turn
 whenever the pointer was not on the focused sheet, which on a small screen is
 most of the time, and the wheel would stop working. A turn moves no focus: the
 pointer says where the turn happened, not which sheet the user wants next, and a
-scroll that moved the focus would move the sheet out from under the reader. A
-turn with no child asking is dropped, like every other report -- there is no
-tumu command behind the wheel.
+scroll that moved the focus would move the sheet out from under the reader.
+
+A turn with no child asking is not dropped: a scroll **down** opens the focused
+sheet's history in an editor sheet, the same command `prefix l` runs (see
+[Copy mode](#copy-mode-poc)). It is the one thing tumu does behind the wheel --
+there is no other command there -- and only *down* does it: an up turn has no
+"above the top" to mean, so it is dropped like any other report with nothing
+behind it.
 
 Dragging works: tumu remembers which button it forwarded a press for, so a drag
 names the button the child is holding. A drag that began on a tracking child keeps

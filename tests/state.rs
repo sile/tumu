@@ -1314,11 +1314,109 @@ fn only_a_left_press_moves_focus() {
         tuinix::MouseInputKind::MiddlePress,
         tuinix::MouseInputKind::Drag,
         tuinix::MouseInputKind::ScrollUp,
-        tuinix::MouseInputKind::ScrollDown,
     ] {
         state.update(tumu::Event::Mouse(mouse(kind, 5, 60)));
         assert_eq!(state.focused, focused, "{kind:?} moved focus");
     }
+    // `ScrollDown` is deliberately absent: with nothing asking for the mouse it
+    // opens copy mode rather than moving the focus. That it leaves the focus on
+    // the sheet the history was read from is asserted on its own, below.
+}
+
+#[test]
+fn a_scroll_down_with_nothing_asking_opens_copy_mode() {
+    // With no child asking for the mouse, a scroll down is the copy-mode door:
+    // the same command `prefix l` runs, so the wheel and the key are two ways
+    // into one room. What proves it is the editor sheet the command adds -- and
+    // the `OpenEditor` that names the history to read.
+    let mut state = state_with(24, 80, 2);
+    let session = session(7);
+    state.stack.attach_session(0, session);
+    let before = state.stack.len();
+
+    let actions = state.update(tumu::Event::Mouse(mouse(
+        tuinix::MouseInputKind::ScrollDown,
+        5,
+        10,
+    )));
+
+    assert_eq!(
+        actions.first(),
+        Some(&tumu::Action::OpenEditor { index: 0, session }),
+        "the wheel opens the focused sheet's history: {actions:?}"
+    );
+    assert_eq!(state.stack.len(), before + 1, "an editor sheet is added");
+    // The editor sheet goes on top and takes the focus, exactly as `prefix l`
+    // leaves it: the keyboard follows the editor in.
+    assert_eq!(state.focused, Some(state.stack.sheets()[0].0));
+}
+
+#[test]
+fn a_scroll_down_with_a_child_asking_is_forwarded_not_turned_into_copy_mode() {
+    // The ask decides the meaning of the turn: a pager that wanted the mouse
+    // pages on the wheel, and the history is *not* opened on top of it. The
+    // report is the child's, and no sheet is added.
+    let mut state = state_with(24, 80, 2);
+    let session = session(7);
+    state.stack.attach_session(0, session);
+    let before = state.stack.len();
+    state.update(tumu::Event::MouseWanted(true));
+
+    let actions = state.update(tumu::Event::Mouse(mouse(
+        tuinix::MouseInputKind::ScrollDown,
+        5,
+        10,
+    )));
+
+    assert!(
+        matches!(
+            actions.as_slice(),
+            [tumu::Action::SendMouseToFocused { index: 0, .. }]
+        ),
+        "the turn is the child's: {actions:?}"
+    );
+    assert_eq!(state.stack.len(), before, "no editor sheet is added");
+}
+
+#[test]
+fn a_scroll_up_with_nothing_asking_does_nothing() {
+    // Only *down* opens copy mode: there is no "above the top" to go to, so an
+    // up turn with nothing asking is dropped like any other report with nothing
+    // behind it. The distinction is the point -- a wheel that opened the history
+    // on either direction would add a sheet to every scroll.
+    let mut state = state_with(24, 80, 2);
+    let session = session(7);
+    state.stack.attach_session(0, session);
+    let before = state.stack.len();
+    let focused = state.focused;
+
+    let actions = state.update(tumu::Event::Mouse(mouse(
+        tuinix::MouseInputKind::ScrollUp,
+        5,
+        10,
+    )));
+
+    assert!(actions.is_empty(), "nothing is done: {actions:?}");
+    assert_eq!(state.stack.len(), before, "no sheet is added");
+    assert_eq!(state.focused, focused, "the focus does not move");
+}
+
+#[test]
+fn a_scroll_down_with_no_session_to_read_does_nothing() {
+    // A sheet whose child has not started yet has no history to open, so the
+    // turn is a no-op -- the same answer `prefix l` gives on such a sheet. The
+    // wheel must not add an editor sheet on an empty file.
+    let mut state = state_with(24, 80, 2);
+    let before = state.stack.len();
+
+    let actions = state.update(tumu::Event::Mouse(mouse(
+        tuinix::MouseInputKind::ScrollDown,
+        5,
+        10,
+    )));
+
+    assert!(actions.is_empty(), "nothing is done: {actions:?}");
+    assert_eq!(state.stack.len(), before, "no sheet is added");
 }
 
 #[test]
