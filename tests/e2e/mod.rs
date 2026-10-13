@@ -255,11 +255,20 @@ impl TumuHarness {
     ///
     /// A box narrows its text to its interior width, so a long message is split
     /// at the wrap point rather than at a word: a needle that straddles the wrap
-    /// is on no single row. Joining the rows with no separator puts it back, so a
-    /// test can match a message without having to know where the box happened to
-    /// fold it.
+    /// is on no single row. Joining the rows puts it back, so a test can match a
+    /// message without having to know where the box happened to fold it.
+    ///
+    /// A bordered box puts its border *between* the wrapped pieces -- the row a
+    /// message continues on still starts with the box's left edge -- so a plain
+    /// join would leave the border in the middle of the word. Each row's border
+    /// and the padding beside it are dropped before the join, which leaves the
+    /// interior text touching whether the box is bordered or bare.
     pub fn screen_joined(&self) -> String {
-        self.screen_rows().join("")
+        self.screen_rows()
+            .iter()
+            .map(|row| strip_borders(row))
+            .collect::<Vec<_>>()
+            .join("")
     }
 
     /// Whether the screen, rows joined with no separator, contains `needle`.
@@ -391,6 +400,19 @@ fn line_text(cells: &[termnix::Cell]) -> String {
         line.push(cell.ch);
     }
     line.trim_end().to_string()
+}
+
+/// Removes a row's box-drawing border and the space padding beside it.
+///
+/// A bordered row is `│ text │` or a run of `─`, `┌`, `┐`, `└`, `┘`. The wrap
+/// the box imposes is on its interior, so a message that continues on the next
+/// row resumes right after the border; dropping the border lets the two pieces
+/// touch once the rows are joined.
+fn strip_borders(row: &str) -> String {
+    row.trim_start_matches(['│', ' '])
+        .trim_end_matches(['│', ' '])
+        .trim_matches(['─', '┌', '┐', '└', '┘'])
+        .to_string()
 }
 
 /// A non-zero [`termnix::Size`] from plain `u16` dimensions.
