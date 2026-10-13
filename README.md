@@ -1,7 +1,14 @@
 tumu
 ====
 
+[![Crates.io](https://img.shields.io/crates/v/tumu.svg)](https://crates.io/crates/tumu)
+[![Actions Status](https://github.com/sile/tumu/workflows/CI/badge.svg)](https://github.com/sile/tumu/actions)
+![License](https://img.shields.io/crates/l/tumu)
+
 "tumu (積む)" is "stack" in Japanese.
+
+A terminal multiplexer with stacked sheets, written for Termux and a small
+black-and-white display.
 
 - Terminal multiplexer
 - Designed for
@@ -21,6 +28,23 @@ tumu
   program is not using the mouse
   - Bounded scrollback, set by `--scrollback` or `$TUMU_SCROLLBACK`
   - Prefix key character, set by `--prefix` or `$TUMU_PREFIX`
+
+Installation
+------------
+
+tumu is a proof of concept and is published to crates.io as such, so the
+version may move quickly. Install it with:
+
+```console
+$ cargo install tumu
+```
+
+Or build from a checkout of this repository:
+
+```console
+$ cargo build --release
+$ ./target/release/tumu --help
+```
 
 Stacked sheets
 --------------

@@ -2,8 +2,15 @@
 name = "tumu"
 version = "0.0.1"
 edition = "2024"
-publish = false
+rust-version = "1.98"
 description = "A terminal multiplexer with stacked sheets"
+license = "MIT"
+homepage = "https://github.com/sile/tumu"
+repository = "https://github.com/sile/tumu"
+readme = "README.md"
+keywords = ["terminal", "multiplexer", "tui"]
+categories = ["command-line-utilities"]
+exclude = ["backlog/"]
 
 [dependencies]
 libc = "0.2"
