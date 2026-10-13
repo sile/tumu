@@ -841,6 +841,47 @@ fn editing_the_scrollback_follows_focus() {
 }
 
 #[test]
+fn a_copy_mode_sheet_is_marked_as_such() {
+    let mut state = state_with(24, 80, 2);
+    state.stack.attach_session(0, session(7));
+
+    run_command(&mut state, 'l');
+
+    let editor = state.stack.sheets()[0].0;
+    assert_eq!(state.focused, Some(editor));
+    assert_eq!(
+        state.stack.role_of(0),
+        Some(tumu::SheetRole::CopyMode),
+        "the sheet `prefix l` pushes is a copy-mode sheet"
+    );
+    // The sheet it was read from stays an ordinary sheet.
+    assert_eq!(state.stack.role_of(1), Some(tumu::SheetRole::Normal));
+}
+
+#[test]
+fn a_scroll_up_from_a_copy_mode_sheet_does_not_open_another() {
+    // A wheel *gesture* is many turns, and the turns after the first land on the
+    // editor sheet. Until the editor asks for the mouse those turns have nothing
+    // to page, so the copy-mode door is the only thing they could do -- and it
+    // must stay shut, or the gesture stacks one history per turn.
+    let mut state = state_with(24, 80, 2);
+    state.stack.attach_session(0, session(7));
+    run_command(&mut state, 'l');
+    let editor = state.focused;
+    let before = state.stack.len();
+
+    let actions = state.update(tumu::Event::Mouse(mouse(
+        tuinix::MouseInputKind::ScrollUp,
+        5,
+        10,
+    )));
+
+    assert!(actions.is_empty(), "nothing is opened: {actions:?}");
+    assert_eq!(state.stack.len(), before, "no second sheet is added");
+    assert_eq!(state.focused, editor, "the focus stays on the editor sheet");
+}
+
+#[test]
 fn editing_the_scrollback_on_an_empty_stack_does_nothing() {
     let mut state = state_with(24, 80, 1);
     run_ext_close(&mut state);
@@ -1313,19 +1354,19 @@ fn only_a_left_press_moves_focus() {
         tuinix::MouseInputKind::RightPress,
         tuinix::MouseInputKind::MiddlePress,
         tuinix::MouseInputKind::Drag,
-        tuinix::MouseInputKind::ScrollUp,
+        tuinix::MouseInputKind::ScrollDown,
     ] {
         state.update(tumu::Event::Mouse(mouse(kind, 5, 60)));
         assert_eq!(state.focused, focused, "{kind:?} moved focus");
     }
-    // `ScrollDown` is deliberately absent: with nothing asking for the mouse it
+    // `ScrollUp` is deliberately absent: with nothing asking for the mouse it
     // opens copy mode rather than moving the focus. That it leaves the focus on
     // the sheet the history was read from is asserted on its own, below.
 }
 
 #[test]
-fn a_scroll_down_with_nothing_asking_opens_copy_mode() {
-    // With no child asking for the mouse, a scroll down is the copy-mode door:
+fn a_scroll_up_with_nothing_asking_opens_copy_mode() {
+    // With no child asking for the mouse, a scroll up is the copy-mode door:
     // the same command `prefix l` runs, so the wheel and the key are two ways
     // into one room. What proves it is the editor sheet the command adds -- and
     // the `OpenEditor` that names the history to read.
@@ -1335,7 +1376,7 @@ fn a_scroll_down_with_nothing_asking_opens_copy_mode() {
     let before = state.stack.len();
 
     let actions = state.update(tumu::Event::Mouse(mouse(
-        tuinix::MouseInputKind::ScrollDown,
+        tuinix::MouseInputKind::ScrollUp,
         5,
         10,
     )));
@@ -1347,12 +1388,13 @@ fn a_scroll_down_with_nothing_asking_opens_copy_mode() {
     );
     assert_eq!(state.stack.len(), before + 1, "an editor sheet is added");
     // The editor sheet goes on top and takes the focus, exactly as `prefix l`
-    // leaves it: the keyboard follows the editor in.
+    // leaves it: the keyboard follows the editor in, so a gesture of many turns
+    // does not open a sheet per turn.
     assert_eq!(state.focused, Some(state.stack.sheets()[0].0));
 }
 
 #[test]
-fn a_scroll_down_with_a_child_asking_is_forwarded_not_turned_into_copy_mode() {
+fn a_scroll_up_with_a_child_asking_is_forwarded_not_turned_into_copy_mode() {
     // The ask decides the meaning of the turn: a pager that wanted the mouse
     // pages on the wheel, and the history is *not* opened on top of it. The
     // report is the child's, and no sheet is added.
@@ -1363,7 +1405,7 @@ fn a_scroll_down_with_a_child_asking_is_forwarded_not_turned_into_copy_mode() {
     state.update(tumu::Event::MouseWanted(true));
 
     let actions = state.update(tumu::Event::Mouse(mouse(
-        tuinix::MouseInputKind::ScrollDown,
+        tuinix::MouseInputKind::ScrollUp,
         5,
         10,
     )));
@@ -1379,9 +1421,9 @@ fn a_scroll_down_with_a_child_asking_is_forwarded_not_turned_into_copy_mode() {
 }
 
 #[test]
-fn a_scroll_up_with_nothing_asking_does_nothing() {
-    // Only *down* opens copy mode: there is no "above the top" to go to, so an
-    // up turn with nothing asking is dropped like any other report with nothing
+fn a_scroll_down_with_nothing_asking_does_nothing() {
+    // Only *up* opens copy mode: there is no "below the bottom" to go to, so a
+    // down turn with nothing asking is dropped like any other report with nothing
     // behind it. The distinction is the point -- a wheel that opened the history
     // on either direction would add a sheet to every scroll.
     let mut state = state_with(24, 80, 2);
@@ -1391,7 +1433,7 @@ fn a_scroll_up_with_nothing_asking_does_nothing() {
     let focused = state.focused;
 
     let actions = state.update(tumu::Event::Mouse(mouse(
-        tuinix::MouseInputKind::ScrollUp,
+        tuinix::MouseInputKind::ScrollDown,
         5,
         10,
     )));
@@ -1402,7 +1444,7 @@ fn a_scroll_up_with_nothing_asking_does_nothing() {
 }
 
 #[test]
-fn a_scroll_down_with_no_session_to_read_does_nothing() {
+fn a_scroll_up_with_no_session_to_read_does_nothing() {
     // A sheet whose child has not started yet has no history to open, so the
     // turn is a no-op -- the same answer `prefix l` gives on such a sheet. The
     // wheel must not add an editor sheet on an empty file.
@@ -1410,7 +1452,7 @@ fn a_scroll_down_with_no_session_to_read_does_nothing() {
     let before = state.stack.len();
 
     let actions = state.update(tumu::Event::Mouse(mouse(
-        tuinix::MouseInputKind::ScrollDown,
+        tuinix::MouseInputKind::ScrollUp,
         5,
         10,
     )));
@@ -1851,14 +1893,15 @@ fn the_wheel_past_every_sheet_still_reaches_the_focused_one() {
 #[test]
 fn the_wheel_with_nothing_asking_is_dropped() {
     // The exception the wheel gets is only to the *region* test: a report of
-    // any kind still needs a child that asked for the mouse, and tumu has no
-    // command behind the wheel to fall back on.
+    // any kind still needs a child that asked for the mouse. A down turn has no
+    // command behind it either -- only up opens the history -- so both the
+    // forward and the copy-mode door are closed and the turn is dropped.
     let mut state = state_with(24, 80, 2);
     assert!(!state.mouse_wanted());
     let focused = state.focused;
 
     let actions = state.update(tumu::Event::Mouse(mouse(
-        tuinix::MouseInputKind::ScrollUp,
+        tuinix::MouseInputKind::ScrollDown,
         5,
         10,
     )));

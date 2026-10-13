@@ -61,6 +61,6 @@ pub use render::{
     sheet_content_size, sheet_frame,
 };
 pub use scrollback::{DEFAULT_CELLS, DEFAULT_LINES, ScrollbackLimit};
-pub use sheet::Sheet;
+pub use sheet::{Sheet, SheetRole};
 pub use stack::Stack;
 pub use state::State;

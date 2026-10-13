@@ -59,11 +59,25 @@ impl Stack {
     ///
     /// A new sheet goes on top, as the README requires; the sheet it used to be
     /// above keeps its other neighbours and simply loses rows to the new one.
+    /// The new sheet is [`Normal`](crate::SheetRole::Normal): a sheet the user
+    /// asked for. A copy-mode sheet is pushed with
+    /// [`push_top_role`](Stack::push_top_role).
     pub fn push_top(&mut self) -> SheetId {
+        self.push_top_role(crate::SheetRole::Normal)
+    }
+
+    /// Pushes a new sheet with the given role onto the top of the stack and
+    /// returns its id.
+    ///
+    /// The role is the one thing a new sheet carries that the stack cannot
+    /// derive: it is what the core opened the sheet *for*, and it is fixed for
+    /// the sheet's life. Everything else -- the session, the title -- is filled
+    /// in as it arrives; see [`Sheet`](crate::Sheet).
+    pub fn push_top_role(&mut self, role: crate::SheetRole) -> SheetId {
         let id = SheetId::new(self.next_id);
         self.next_id = std::num::NonZeroU64::new(self.next_id.get() + 1)
             .expect("an id past the last used is non-zero");
-        self.sheets.insert(0, (id, Sheet::new()));
+        self.sheets.insert(0, (id, Sheet::with_role(role)));
         id
     }
 
@@ -112,6 +126,12 @@ impl Stack {
         if let Some((_, sheet)) = self.sheets.get_mut(index) {
             sheet.title = title.into();
         }
+    }
+
+    /// Returns the role of the sheet at `index`, or `None` when there is no
+    /// such sheet.
+    pub fn role_of(&self, index: usize) -> Option<crate::SheetRole> {
+        self.sheets.get(index).map(|(_, sheet)| sheet.role)
     }
 
     /// Returns the region of every sheet, top to bottom (or left to right in a

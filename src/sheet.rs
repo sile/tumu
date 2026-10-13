@@ -15,6 +15,28 @@
 
 use crate::TermnixSessionId;
 
+/// What the core opened a sheet for.
+///
+/// The core chooses a sheet's role when it adds the sheet, and the role is what
+/// tells one kind of sheet from another even after the session behind it has
+/// attached -- a distinction the session itself cannot make, since the editor is
+/// just a child like any other once it is running.
+///
+/// It exists for the wheel: a scroll up from an ordinary sheet opens the
+/// history in a copy-mode sheet, and a scroll up *from* that sheet must not open
+/// another one on top of it. Without the role, a copy-mode sheet is
+/// indistinguishable from the shell it was opened over, and a wheel gesture
+/// stacks one history per turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SheetRole {
+    /// A sheet the user asked for: a shell, or an external tool in its place.
+    #[default]
+    Normal,
+
+    /// A sheet showing another sheet's history -- `prefix l`, or the wheel.
+    CopyMode,
+}
+
 /// One sheet: a window of the stack showing a terminal session.
 ///
 /// A sheet is deliberately neither `Copy` nor comparable. It is a place a
@@ -30,6 +52,13 @@ pub struct Sheet {
     /// The session this sheet displays, or `None` until one is attached.
     pub session: Option<TermnixSessionId>,
 
+    /// What the core opened this sheet for.
+    ///
+    /// It is set when the sheet is pushed and is not changed afterwards: a
+    /// sheet stays the copy-mode sheet it was opened as, for as long as it is
+    /// in the stack.
+    pub role: SheetRole,
+
     /// The window title the child last set, or empty when it set none.
     ///
     /// The child owns this string: it arrives from OSC 0 / OSC 2 and is stored
@@ -42,8 +71,14 @@ pub struct Sheet {
 impl Sheet {
     /// Makes a sheet with no session attached and no title.
     pub const fn new() -> Self {
+        Self::with_role(SheetRole::Normal)
+    }
+
+    /// Makes a sheet with no session, no title, and the given role.
+    pub const fn with_role(role: SheetRole) -> Self {
         Self {
             session: None,
+            role,
             title: String::new(),
         }
     }

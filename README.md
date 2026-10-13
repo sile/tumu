@@ -352,17 +352,23 @@ and the editor's exit closes its sheet through the ordinary session-exit path.
 There are two doors into it, and they open onto the same room:
 
 - `prefix l` -- the key one, always there.
-- a **scroll down** (a wheel turn towards the user), when the focused sheet's
+- a **scroll up** (a wheel turn away from the user), when the focused sheet's
   child has not asked for the mouse -- the one a hand reaches for without
   leaving the pointer.
 
 A wheel turn is only tumu's when the child did not ask for the mouse (see
 [Mouse](#mouse)): a pager that wanted the mouse pages on the turn, and the
 history is not opened on top of it. When nothing is asking there is nothing to
-page, and "scroll down past the bottom" reads as "show me the history", which
-is the editor sheet. Only *down* opens it -- an up turn has no such reading
-(there is no "above the top" to go to), so it is dropped like any other report
+page, and "scroll up past the top" reads as "show me the history", which
+is the editor sheet. Only *up* opens it -- a down turn has no such reading
+(there is no "below the bottom" to go to), so it is dropped like any other report
 with nothing behind it.
+
+Opening it moves the focus to the editor sheet, which is what keeps a wheel
+*gesture* from opening a sheet per turn: the first turn opens the history and
+the keyboard follows the editor in, so the turns after it are the editor's own
+(it asked for the mouse) and scroll it instead of stacking another history on
+top of it.
 
 Nothing is handed over. The terminal driver stays up, so the frames of the
 other sheets keep their meaning and the screen is never repainted from scratch.
@@ -520,12 +526,14 @@ most of the time, and the wheel would stop working. A turn moves no focus: the
 pointer says where the turn happened, not which sheet the user wants next, and a
 scroll that moved the focus would move the sheet out from under the reader.
 
-A turn with no child asking is not dropped: a scroll **down** opens the focused
+A turn with no child asking is not dropped: a scroll **up** opens the focused
 sheet's history in an editor sheet, the same command `prefix l` runs (see
 [Copy mode](#copy-mode-poc)). It is the one thing tumu does behind the wheel --
-there is no other command there -- and only *down* does it: an up turn has no
-"above the top" to mean, so it is dropped like any other report with nothing
-behind it.
+there is no other command there -- and only *up* does it: a down turn has no
+"below the bottom" to mean, so it is dropped like any other report with nothing
+behind it. Opening it moves the focus to the editor sheet, so a wheel gesture
+opens one history and then scrolls the editor, rather than opening a sheet per
+turn.
 
 Dragging works: tumu remembers which button it forwarded a press for, so a drag
 names the button the child is holding. A drag that began on a tracking child keeps

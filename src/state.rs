@@ -271,6 +271,19 @@ impl State {
             .find_map(|(id, sheet)| (*id == focused).then_some(sheet.session).flatten())
     }
 
+    /// Returns whether the focused sheet is a copy-mode sheet.
+    ///
+    /// It is the wheel's guard: a sheet already showing history does not open
+    /// another history, so a gesture of many turns opens one copy-mode sheet
+    /// rather than one per turn. The focused sheet's *role* answers it, which is
+    /// what the sheet was opened for -- the session behind the editor cannot,
+    /// because once it is running it is a child like any other.
+    fn focused_is_copy_mode(&self) -> bool {
+        self.focused_index()
+            .and_then(|index| self.stack.role_of(index))
+            .is_some_and(|role| role == crate::SheetRole::CopyMode)
+    }
+
     /// Applies `event` and returns the actions the edge should carry out.
     ///
     /// The handler is pure with respect to the outside world: it mutates the
@@ -340,17 +353,24 @@ impl State {
     ///
     /// Both exceptions need a child that asked for the mouse, with one
     /// exception of the wheel's own: a child that has *not* asked turns a scroll
-    /// **down** into copy mode. That is the other half of the wheel's job -- with
+    /// **up** into copy mode. That is the other half of the wheel's job -- with
     /// a pager under the keyboard, a turn pages the pager; with nothing asking,
-    /// there is nothing to page, and the natural reading of "scroll down past
-    /// the bottom" is "show me the history", which is what `prefix l` does. The
-    /// key and the wheel are two doors into the same room: `prefix l` is the one
-    /// that is always there, the wheel is the one a hand reaches for without
-    /// leaving the pointer. Only *down* opens it -- up has no such reading (there
-    /// is no "above the top" to go to), so it is dropped like any other report
-    /// with nothing behind it.
+    /// there is nothing to page, and the natural reading of "scroll up past the
+    /// top" is "show me the history", which is what `prefix l` does. The key and
+    /// the wheel are two doors into the same room: `prefix l` is the one that is
+    /// always there, the wheel is the one a hand reaches for without leaving the
+    /// pointer. Only *up* opens it -- down has no such reading (there is no
+    /// "below the bottom" to go to), so it is dropped like any other report with
+    /// nothing behind it.
     ///
-    /// A turn with nothing asking and no copy mode to enter -- up, or with no
+    /// Opening copy mode also moves the focus to the editor sheet it pushes, so
+    /// a *gesture* of many turns opens one sheet, not one per turn: the first
+    /// turn opens the history, the keyboard follows the editor in, and the turns
+    /// after it are the editor's -- a child that asked for the mouse, a pager's
+    /// case -- so they scroll the editor instead of opening another sheet on top
+    /// of it.
+    ///
+    /// A turn with nothing asking and no copy mode to enter -- down, or with no
     /// sheet to read -- is dropped, like every other report. The wheel has no
     /// command of its own beyond this: it either reaches a child or opens the
     /// history, and a turn that does neither is nothing to interpret.
@@ -391,12 +411,20 @@ impl State {
         if self.mouse_wanted && (is_wheel || lands_here) {
             return self.forward_mouse(mouse);
         }
-        // With nothing asking, a scroll down is the copy-mode door: it opens the
+        // With nothing asking, a scroll up is the copy-mode door: it opens the
         // focused sheet's history in an editor sheet, exactly as `prefix l` does.
-        // Only down -- see the method's doc comment for why. It is answered
-        // before the press test because it is the one wheel turn that *is* a
-        // command, and the press test would otherwise drop it.
-        if !self.mouse_wanted && mouse.kind == tuinix::MouseInputKind::ScrollDown {
+        // Only up -- see the method's doc comment for why. It is answered before
+        // the press test because it is the one wheel turn that *is* a command,
+        // and the press test would otherwise drop it.
+        //
+        // A copy-mode sheet does not open a copy-mode sheet: the door is shut on
+        // a sheet that is already showing history, so a wheel *gesture* opens
+        // one and the turns after it scroll that sheet (once its editor asks for
+        // the mouse) or do nothing, rather than stacking a history per turn.
+        if !self.mouse_wanted
+            && mouse.kind == tuinix::MouseInputKind::ScrollUp
+            && !self.focused_is_copy_mode()
+        {
             return self.handle_edit_scrollback();
         }
         if mouse.kind != tuinix::MouseInputKind::LeftPress {
@@ -790,7 +818,11 @@ impl State {
     ///
     /// Focus moves to the editor sheet, so closing it (through the extended
     /// menu, or by quitting the editor) leaves the keyboard on the sheet the
-    /// editor was opened *from*.
+    /// editor was opened *from*. Moving the focus is also what keeps a wheel
+    /// *gesture* from opening a sheet per turn: `prefix l` is one key and one
+    /// sheet, but the wheel repeats, and the turns after the first land on the
+    /// editor -- a child that asked for the mouse -- rather than opening another
+    /// history on top of it.
     fn handle_edit_scrollback(&mut self) -> Vec<Action> {
         let Some(index) = self.focused_index() else {
             return Vec::new();
@@ -831,7 +863,7 @@ impl State {
         // from a `cd`-ed shell is opened in the same directory. The focused
         // sheet's session is read before the push, like every new sheet's.
         let cwd_from = self.focused_session();
-        let id = self.stack.push_top();
+        let id = self.stack.push_top_role(crate::SheetRole::CopyMode);
         self.focused = Some(id);
         let name = format!("{}-{id}.txt", crate::input::SCROLLBACK_FILE_PREFIX);
         vec![

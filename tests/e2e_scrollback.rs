@@ -336,17 +336,17 @@ fn the_cli_limit_overrides_the_environment() {
     );
 }
 
-/// The SGR code a terminal sends for a wheel turn *down* (towards the user).
+/// The SGR code a terminal sends for a wheel turn *up* (away from the user).
 ///
 /// The xterm SGR button code for the wheel is 64 up and 65 down; the harness
 /// writes the raw bytes so the test drives `tumu`'s own decode, not a library
 /// encode.
-const WHEEL_DOWN: u16 = 65;
+const WHEEL_UP: u16 = 64;
 
 #[test]
-fn a_scroll_down_opens_the_scrollback_when_no_child_asks_for_the_mouse() {
+fn a_scroll_up_opens_the_scrollback_when_no_child_asks_for_the_mouse() {
     // The shell prints markers and then sleeps without asking for the mouse, so
-    // a scroll down has nothing to page and belongs to tumu: it is the
+    // a scroll up has nothing to page and belongs to tumu: it is the
     // copy-mode door, the same one `prefix l` opens.
     let shell = script("wheel-shell", &marker_shell(60));
     let out = out_path("wheel-copy-mode");
@@ -365,9 +365,9 @@ fn a_scroll_down_opens_the_scrollback_when_no_child_asks_for_the_mouse() {
     });
     tumu.wait_for_text("LINE-60");
 
-    // A scroll down over the sheet, with no child asking: the turn opens the
+    // A scroll up over the sheet, with no child asking: the turn opens the
     // focused sheet's history in an editor sheet.
-    tumu.send_mouse_code(WHEEL_DOWN, 5, 10);
+    tumu.send_mouse_code(WHEEL_UP, 5, 10);
     // The wait is a `wait_until` and not a sleep on the file: a mouse report is
     // only written to the child's PTY by a pump, so the harness has to keep
     // pumping for the turn to reach `tumu` at all.
@@ -382,13 +382,13 @@ fn a_scroll_down_opens_the_scrollback_when_no_child_asks_for_the_mouse() {
 }
 
 #[test]
-fn a_scroll_up_does_not_open_the_scrollback() {
-    // The mirror of the test above: only *down* opens copy mode, because there
-    // is no "above the top" for an up turn to mean. The editor must not run, so
-    // the output file is never written.
-    let shell = script("wheel-up-shell", &marker_shell(60));
-    let out = out_path("wheel-up-noop");
-    let editor = script("wheel-up-editor", &copy_editor(&out));
+fn a_scroll_down_does_not_open_the_scrollback() {
+    // The mirror of the test above: only *up* opens copy mode, because there
+    // is no "below the bottom" for a down turn to mean. The editor must not run,
+    // so the output file is never written.
+    let shell = script("wheel-down-shell", &marker_shell(60));
+    let out = out_path("wheel-down-noop");
+    let editor = script("wheel-down-editor", &copy_editor(&out));
 
     let mut tumu = e2e::TumuHarness::with_args(24, 80, {
         let shell = shell.to_str().expect("utf-8 path").to_string();
@@ -401,8 +401,8 @@ fn a_scroll_up_does_not_open_the_scrollback() {
     });
     tumu.wait_for_text("LINE-60");
 
-    // SGR 64 is a wheel turn *up*.
-    tumu.send_mouse_code(64, 5, 10);
+    // SGR 65 is a wheel turn *down*.
+    tumu.send_mouse_code(65, 5, 10);
 
     // The report is only written to the PTY by a pump, so the wait is what makes
     // the turn reach `tumu` at all: a bare sleep would assert nothing, because
@@ -413,7 +413,7 @@ fn a_scroll_up_does_not_open_the_scrollback() {
 
     assert!(
         !out.exists(),
-        "an up turn must not open the history: {}",
+        "a down turn must not open the history: {}",
         out.display()
     );
     // The one sheet is still the only one -- its label is on the last row -- so
@@ -423,5 +423,53 @@ fn a_scroll_up_does_not_open_the_scrollback() {
         rows[rows.len() - 1].starts_with("└ [C-q ...]"),
         "the single sheet still fills the terminal:\n{}",
         tumu.screen_text()
+    );
+}
+
+#[test]
+fn a_burst_of_scroll_turns_opens_one_editor_not_one_per_turn() {
+    // A wheel *gesture* is many turns, and the host writes them all before the
+    // editor sheet's child has had a chance to ask for the mouse. Opening the
+    // history moves the focus to the editor sheet, so the turns after the first
+    // belong to the editor -- but only once it is asking, and the burst can beat
+    // the ask. What must hold either way is that the gesture opens *one* history:
+    // one sheet, one editor run. The editor appends a line per run, so counting
+    // the lines counts the sheets.
+    let shell = script("wheel-burst-shell", &marker_shell(60));
+    let out = out_path("wheel-burst");
+    // Appends per run, then holds the sheet open so a second run would be
+    // visible as a second line rather than dying with its own sheet.
+    let editor = script(
+        "wheel-burst-editor",
+        &format!("echo RUN >> {}; exec sleep 30", out.display()),
+    );
+
+    let mut tumu = e2e::TumuHarness::with_args(24, 80, {
+        let shell = shell.to_str().expect("utf-8 path").to_string();
+        let editor = editor.to_str().expect("utf-8 path").to_string();
+        move |command| {
+            command.env("SHELL", &shell);
+            command.env("TUMU_EDITOR", &editor);
+            command.arg("--orientation").arg("vertical");
+        }
+    });
+    tumu.wait_for_text("LINE-60");
+
+    // Three turns in one burst, before any pump delivers the editor's ask.
+    tumu.send_mouse_code(WHEEL_UP, 5, 10);
+    tumu.send_mouse_code(WHEEL_UP, 5, 10);
+    tumu.send_mouse_code(WHEEL_UP, 5, 10);
+
+    tumu.wait_until("the editor runs", |_| out.exists());
+    // Give tumu the rest of the burst and a round to act on each turn; if the
+    // gesture opened a sheet per turn, the extra runs would land by now.
+    tumu.wait_until("the burst to be delivered", |_| true);
+    tumu.wait_until("a round to act", |_| true);
+
+    let runs = std::fs::read_to_string(&out).expect("read the editor output");
+    let count = runs.lines().count();
+    assert_eq!(
+        count, 1,
+        "a gesture opens one history, not one per turn:\n{runs}"
     );
 }
